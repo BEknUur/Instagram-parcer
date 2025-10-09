@@ -1,5 +1,6 @@
 # app/main.py
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pathlib import Path
 
 import asyncio
@@ -15,6 +16,15 @@ app = FastAPI(
     title="Mythic Instagram Parser API",
     description="Единый endpoint: полный парсинг профиля Instagram (посты, комментарии, stories, highlights) с сохранением JSON и загрузкой медиа.",
     version="1.0.0"
+)
+
+# Добавляем CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Разрешаем все origins для разработки
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 @app.get("/health")
@@ -35,14 +45,15 @@ async def start_scrape(
     run_input = {
         "directUrls":     [clean_url],
         "resultsType":    "details",
+        "resultsLimit": 100,           # ✅ Максимум 100 элементов
+        "searchLimit": 1,              # Только один профиль  
+        "addParentData": True,         # Добавляем данные профиля
         "scrapeComments": True,        # ✅ ВКЛЮЧАЕМ сбор комментариев
         "commentsLimit": 100,          # ✅ До 100 комментариев на пост
         "scrapeStories": True,         # Собираем сторисы
         "storiesLimit": 10,            # До 10 сторисов
         "scrapeHighlights": True,      # ✅ Собираем актуальное (highlights)
         "highlightsLimit": 20,         # Лимит элементов в актуальном
-        "resultsLimit": 200,           # Максимум 200 постов
-        "addParentData": True,         # Добавляем данные профиля
         "enhanceUserSearchWithFacebookPage": False,  # Отключаем Facebook
     }
 
