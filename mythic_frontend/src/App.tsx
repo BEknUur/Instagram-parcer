@@ -55,6 +55,11 @@ function App() {
   const [postComments, setPostComments] = useState<PostComments>({})
   const [commentLimits, setCommentLimits] = useState<{[key: string]: number}>({})
 
+  // Определяем API URL в зависимости от окружения
+  const API_BASE_URL = window.location.hostname === 'localhost' 
+    ? 'http://localhost:8001' 
+    : '/api';
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     
@@ -74,7 +79,7 @@ function App() {
       
       // Отправляем запрос к бэкенду
       const response = await fetch(
-        `http://localhost:8001/start-scrape?url=${encodeURIComponent(instagramUrl)}&username=${encodeURIComponent(cleanUsername)}`
+        `${API_BASE_URL}/start-scrape?url=${encodeURIComponent(instagramUrl)}&username=${encodeURIComponent(cleanUsername)}`
       )
       
       if (!response.ok) {
@@ -104,7 +109,7 @@ function App() {
     
     try {
       const response = await fetch(
-        `http://localhost:8001/scrape-comments?post_urls=${encodeURIComponent(postUrl)}&results_limit=${limit}`
+        `${API_BASE_URL}/scrape-comments?post_urls=${encodeURIComponent(postUrl)}&results_limit=${limit}`
       )
       
       if (!response.ok) {

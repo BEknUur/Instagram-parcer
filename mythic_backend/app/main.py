@@ -21,7 +21,13 @@ app = FastAPI(
 # Добавляем CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Разрешаем все origins для разработки
+    allow_origins=[
+        "http://localhost:5174",
+        "http://localhost:3000",
+        "http://104.248.18.254",
+        "https://mythicai.me",
+        "https://www.mythicai.me"
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

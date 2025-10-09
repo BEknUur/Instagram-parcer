@@ -13,13 +13,23 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+    restart: unless-stopped
+    networks:
+      - mythic-network
 
   frontend:
     build: ./mythic_frontend
     container_name: mythic-frontend
     ports:
-      - "5174:80"
+      - "80:80"
     depends_on:
       - backend
     environment:
       - VITE_API_URL=http://localhost:8001
+    restart: unless-stopped
+    networks:
+      - mythic-network
+
+networks:
+  mythic-network:
+    driver: bridge
