@@ -56,3 +56,12 @@ async def fetch_items(dataset_id: str, retries: int = 10, delay: float = 2.0) ->
             delay *= 1.5
     log.error("Dataset %s not found after %s retries", dataset_id, retries)
     return []
+
+
+async def run_comment_scraper(run_input: dict) -> dict:
+    """Запускаем Instagram Comment Scraper Actor (apify/instagram-comment-scraper)."""
+    def _sync():
+        # Используем Actor по имени apify/instagram-comment-scraper
+        act = _client.actor("apify/instagram-comment-scraper")
+        return act.call(run_input=run_input)
+    return await anyio.to_thread.run_sync(_sync)

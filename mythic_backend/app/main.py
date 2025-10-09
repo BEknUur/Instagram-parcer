@@ -8,7 +8,7 @@ from pydantic import AnyUrl
 import json, logging, datetime
 
 from app.config import settings
-from app.services.apify_client import run_actor, fetch_run, fetch_items
+from app.services.apify_client import run_actor, fetch_run, fetch_items, run_comment_scraper
 from app.services.downloader import download_photos
 
 log = logging.getLogger("api")
@@ -99,9 +99,9 @@ async def start_scrape(
                 (run_dir / "user_meta.json").write_text(json.dumps(user_meta, ensure_ascii=False, indent=2), encoding="utf-8")
                 (run_dir / "posts.json").write_text(json.dumps(items, ensure_ascii=False, indent=2), encoding="utf-8")
                 
-                # Запускаем загрузку изображений в фоне (не ждем)
-                images_dir = run_dir / "images"
-                asyncio.create_task(download_photos_async(items, images_dir))
+                # Загрузка изображений отключена для экономии ресурсов
+                # images_dir = run_dir / "images"
+                # asyncio.create_task(download_photos_async(items, images_dir))
                 
                 log.info(f"✅ Синхронный парсинг завершен для {username}. Получено {len(items)} элементов")
                 
@@ -140,6 +140,95 @@ async def start_scrape(
                 elapsed_time += check_interval
     
     raise HTTPException(408, f"Парсинг не завершился за {max_wait_time} секунд.")
+
+
+@app.get("/scrape-comments")
+async def scrape_comments(
+    post_urls: str,
+    results_limit: int = 100
+):
+    """
+    Парсинг комментариев под постами Instagram через apify/instagram-comment-scraper
+    
+    Args:
+        post_urls: URL постов через запятую
+        results_limit: Максимальное количество комментариев
+    """
+    
+    # Разделяем URL
+    urls_list = [url.strip() for url in post_urls.split(',') if url.strip()]
+    
+    if not urls_list:
+        raise HTTPException(400, "Укажите хотя бы один URL поста")
+    
+    if len(urls_list) > 50:
+        raise HTTPException(400, "Максимум 50 постов за запрос")
+    
+    log.info(f"🚀 Парсинг комментариев для {len(urls_list)} постов")
+    
+    run_input = {
+        "directUrls": urls_list,
+        "resultsLimit": results_limit,
+    }
+    
+    try:
+        run = await run_comment_scraper(run_input)
+        run_id = run["id"]
+        
+        log.info(f"🔄 Comment scraper запущен, runId={run_id}")
+        
+        # Ждём завершения (макс 5 минут)
+        max_wait_time = 300
+        check_interval = 10
+        elapsed_time = 0
+        
+        while elapsed_time < max_wait_time:
+            run_status = await fetch_run(run_id)
+            status = run_status.get("status")
+            
+            log.info(f"⏳ Статус: {status} ({elapsed_time}с)")
+            
+            if status == "SUCCEEDED":
+                dataset_id = run_status.get("defaultDatasetId")
+                if not dataset_id:
+                    raise HTTPException(500, "dataset_id не получен")
+                
+                comments = await fetch_items(dataset_id)
+                
+                # Сохраняем
+                save_dir = Path("data/comments") / run_id
+                save_dir.mkdir(parents=True, exist_ok=True)
+                (save_dir / "comments.json").write_text(
+                    json.dumps(comments, ensure_ascii=False, indent=2),
+                    encoding="utf-8"
+                )
+                
+                log.info(f"✅ Получено {len(comments)} комментариев")
+                
+                return {
+                    "success": True,
+                    "runId": run_id,
+                    "message": f"✅ Получено {len(comments)} комментариев",
+                    "total_comments": len(comments),
+                    "posts_count": len(urls_list),
+                    "processing_time_seconds": elapsed_time,
+                    "comments": comments
+                }
+                
+            elif status == "FAILED":
+                raise HTTPException(500, f"Ошибка: {run_status.get('statusMessage')}")
+            
+            elif status in ["RUNNING", "READY"]:
+                await asyncio.sleep(check_interval)
+                elapsed_time += check_interval
+            else:
+                raise HTTPException(500, f"Неожиданный статус: {status}")
+        
+        raise HTTPException(408, f"Таймаут {max_wait_time}с")
+        
+    except Exception as e:
+        log.error(f"❌ Ошибка парсинга комментариев: {e}")
+        raise HTTPException(500, str(e))
 
 
 async def download_photos_async(items, images_dir):

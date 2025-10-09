@@ -33,6 +33,15 @@ interface PostCaption {
   timestamp: string;
   likesCount: number;
   commentsCount: number;
+  shortCode?: string;
+}
+
+interface PostComments {
+  [shortCode: string]: {
+    loading: boolean;
+    comments: any[];
+    error: string | null;
+  };
 }
 
 function App() {
@@ -43,6 +52,8 @@ function App() {
   const [showJson, setShowJson] = useState(false)
   const [showCaptions, setShowCaptions] = useState(true)
   const [showProfile, setShowProfile] = useState(true)
+  const [postComments, setPostComments] = useState<PostComments>({})
+  const [commentLimits, setCommentLimits] = useState<{[key: string]: number}>({})
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -80,6 +91,49 @@ function App() {
     }
   }
 
+  // Функция для загрузки комментариев конкретного поста
+  const loadPostComments = async (shortCode: string) => {
+    const postUrl = `https://www.instagram.com/p/${shortCode}/`
+    const limit = commentLimits[shortCode] || 50
+    
+    // Устанавливаем состояние загрузки
+    setPostComments(prev => ({
+      ...prev,
+      [shortCode]: { loading: true, comments: [], error: null }
+    }))
+    
+    try {
+      const response = await fetch(
+        `http://localhost:8001/scrape-comments?post_urls=${encodeURIComponent(postUrl)}&results_limit=${limit}`
+      )
+      
+      if (!response.ok) {
+        throw new Error(`Ошибка ${response.status}`)
+      }
+      
+      const data = await response.json()
+      
+      setPostComments(prev => ({
+        ...prev,
+        [shortCode]: {
+          loading: false,
+          comments: data.comments || [],
+          error: null
+        }
+      }))
+      
+    } catch (err: any) {
+      setPostComments(prev => ({
+        ...prev,
+        [shortCode]: {
+          loading: false,
+          comments: [],
+          error: err.message || 'Ошибка загрузки комментариев'
+        }
+      }))
+    }
+  }
+
   // Извлекаем информацию о профиле
   const extractProfileInfo = (data: any[]): ProfileInfo | null => {
     if (!data || data.length === 0) return null
@@ -108,7 +162,8 @@ function App() {
               text: post.caption,
               timestamp: post.timestamp || '',
               likesCount: post.likesCount || 0,
-              commentsCount: post.commentsCount || 0
+              commentsCount: post.commentsCount || 0,
+              shortCode: post.shortCode || post.url?.split('/p/')[1]?.split('/')[0] || ''
             })
           }
         })
@@ -120,12 +175,12 @@ function App() {
   return (
     <div className="container">
       <h1>Instagram Parser</h1>
-      <p className="subtitle">Получите данные профиля Instagram</p>
+      <p className="subtitle">Получите данные профиля и комментарии Instagram</p>
       
       <form onSubmit={handleSubmit} className="form">
         <div className="input-group">
           <input
-            type="text"
+                type="text"
             value={username}
             onChange={(e) => setUsername(e.target.value)}
             placeholder="@username"
@@ -251,21 +306,81 @@ function App() {
                 </div>
                 {showCaptions && (
                   <div className="captions-list">
-                    {captions.map((caption, index) => (
-                      <div key={index} className="caption-card">
-                        <div className="caption-header">
-                          <span className="caption-number">Пост #{index + 1}</span>
-                          <span className="caption-date">
-                            {caption.timestamp ? new Date(caption.timestamp).toLocaleDateString('ru-RU') : 'Дата неизвестна'}
-                          </span>
+                    {captions.map((caption, index) => {
+                      const shortCode = caption.shortCode || ''
+                      const commentsState = postComments[shortCode]
+                      
+                      return (
+                        <div key={index} className="caption-card">
+                          <div className="caption-header">
+                            <span className="caption-number">
+                              Пост #{index + 1}
+                              {shortCode && <span className="shortcode"> ({shortCode})</span>}
+                            </span>
+                            <span className="caption-date">
+                              {caption.timestamp ? new Date(caption.timestamp).toLocaleDateString('ru-RU') : 'Дата неизвестна'}
+                            </span>
+                          </div>
+                          <p className="caption-text">{caption.text}</p>
+                          <div className="caption-stats">
+                            <span>❤️ {caption.likesCount.toLocaleString()}</span>
+                            <span>💬 {caption.commentsCount.toLocaleString()}</span>
+                          </div>
+                          
+                          {/* Кнопка для загрузки комментариев */}
+                          {shortCode && (
+                            <div className="comments-controls">
+                              <input
+                                type="number"
+                                min="1"
+                                max="500"
+                                value={commentLimits[shortCode] || 50}
+                                onChange={(e) => setCommentLimits(prev => ({
+                                  ...prev,
+                                  [shortCode]: Number(e.target.value)
+                                }))}
+                                className="comment-limit-input"
+                                placeholder="Лимит"
+                              />
+                              <button
+                                onClick={() => loadPostComments(shortCode)}
+                                disabled={commentsState?.loading}
+                                className="load-comments-btn"
+                              >
+                                {commentsState?.loading ? '⏳ Загрузка...' : '💬 Загрузить комментарии'}
+                              </button>
+                            </div>
+                          )}
+                          
+                          {/* Отображение комментариев */}
+                          {commentsState?.error && (
+                            <div className="comments-error">❌ {commentsState.error}</div>
+                          )}
+                          
+                          {commentsState?.comments && commentsState.comments.length > 0 && (
+                            <div className="post-comments-section">
+                              <h4>💬 Комментарии ({commentsState.comments.length})</h4>
+                              <div className="post-comments-list">
+                                {commentsState.comments.map((comment: any, cIndex: number) => (
+                                  <div key={cIndex} className="comment-item">
+                                    <div className="comment-author">
+                                      <strong>@{comment.ownerUsername || 'Аноним'}</strong>
+                                      <span className="comment-date">
+                                        {comment.timestamp ? new Date(comment.timestamp).toLocaleDateString('ru-RU') : ''}
+                                      </span>
+                                    </div>
+                                    <p className="comment-text">{comment.text}</p>
+                                    {comment.likesCount > 0 && (
+                                      <span className="comment-likes">❤️ {comment.likesCount}</span>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
                         </div>
-                        <p className="caption-text">{caption.text}</p>
-                        <div className="caption-stats">
-                          <span>❤️ {caption.likesCount.toLocaleString()}</span>
-                          <span>💬 {caption.commentsCount.toLocaleString()}</span>
-                        </div>
-                      </div>
-                    ))}
+                      )
+                    })}
                   </div>
                 )}
               </div>
@@ -288,73 +403,6 @@ function App() {
               </pre>
             )}
           </div>
-
-          {result.data && result.data.length > 0 && (
-            <div className="images-section">
-              <h3>📸 Фотографии</h3>
-              <div className="images-grid">
-                {result.data.map((item: any, index: number) => {
-                  // Собираем все фотографии из разных источников
-                  const photos: any[] = [];
-                  
-                  // Проверяем latestPosts
-                  if (item.latestPosts && Array.isArray(item.latestPosts)) {
-                    item.latestPosts.forEach((post: any) => {
-                      if (post.displayUrl) {
-                        photos.push({
-                          url: post.displayUrl,
-                          caption: post.caption || '',
-                          type: 'post'
-                        });
-                      }
-                    });
-                  }
-                  
-                  // Проверяем ownerLatestPosts (может быть альтернативный путь)
-                  if (item.ownerLatestPosts && Array.isArray(item.ownerLatestPosts)) {
-                    item.ownerLatestPosts.forEach((post: any) => {
-                      if (post.displayUrl) {
-                        photos.push({
-                          url: post.displayUrl,
-                          caption: post.caption || '',
-                          type: 'post'
-                        });
-                      }
-                    });
-                  }
-                  
-                  return photos.map((photo, photoIndex) => (
-                    <div key={`${index}-${photoIndex}`} className="image-card">
-                      <img 
-                        src={photo.url} 
-                        alt={`Photo ${photoIndex + 1}`}
-                        loading="lazy"
-                        onError={(e) => {
-                          const target = e.target as HTMLImageElement;
-                          target.style.display = 'none';
-                        }}
-                      />
-                      {photo.caption && (
-                        <p className="image-caption">
-                          {photo.caption.length > 150 
-                            ? photo.caption.substring(0, 150) + '...' 
-                            : photo.caption}
-                        </p>
-                      )}
-                    </div>
-                  ));
-                })}
-              </div>
-              {result.data.every((item: any) => 
-                (!item.latestPosts || item.latestPosts.length === 0) && 
-                (!item.ownerLatestPosts || item.ownerLatestPosts.length === 0)
-              ) && (
-                <div className="no-images">
-                  <p>📷 Фотографии не найдены или еще загружаются</p>
-                </div>
-              )}
-            </div>
-          )}
         </div>
       )}
     </div>
