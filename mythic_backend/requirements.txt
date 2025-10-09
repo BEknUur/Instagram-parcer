@@ -1,38 +1,9 @@
-# ========================================
-# Mythic Instagram Parser API
-# Минимальные зависимости для парсера
-# ========================================
-
-# Web Framework
 fastapi>=0.104.1
 uvicorn[standard]>=0.24.0
-python-multipart>=0.0.6
-
-# Database (опционально, для будущих расширений)
-sqlalchemy>=2.0.23
-asyncpg>=0.29.0
-alembic>=1.13.0
-psycopg2-binary>=2.9.9
-
-# Data validation & settings
 pydantic>=2.5.0
 pydantic-settings>=2.0.0
-
-# HTTP clients
 httpx>=0.25.2
-requests>=2.31.0
-
-# Environment & Config
-python-dotenv>=1.0.0
-
-# Instagram scraping via Apify
+anyio>=4.0.0
 apify-client>=1.6.0
-
-# System monitoring (для /health endpoint)
 psutil>=5.9.6
-
-# Security (если планируется авторизация в будущем)
-pyjwt>=2.8.0
-cryptography>=41.0.7
-python-jose[cryptography]>=3.3.0
-passlib[bcrypt]>=1.7.4
+Pillow>=10.0.0

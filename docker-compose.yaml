@@ -1,62 +1,15 @@
 services:
-  # ---------- PostgreSQL ----------
-  database:
-    image: postgres:15-alpine
-    environment:
-      POSTGRES_DB: mythic
-      POSTGRES_USER: mythic
-      POSTGRES_PASSWORD: mythic_password_2024
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-      - ./mythic_backend/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
-    healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -U mythic -d mythic" ]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    networks: [ mythic ]
-
-  # ---------- Redis ----------
-  redis:
-    image: redis:7-alpine
-    command: redis-server --appendonly yes
-    volumes:
-      - redis_data:/data
-    healthcheck:
-      test: [ "CMD", "redis-cli", "ping" ]
-      interval: 10s
-      timeout: 3s
-      retries: 3
-    networks: [ mythic ]
-
-  # ---------- FastAPI bacend --------
   backend:
     build: ./mythic_backend
     env_file: .env
     container_name: mythic-backend
     volumes:
       - ./mythic_backend/data:/usr/src/app/data
-      - ./mythic_backend/static:/usr/src/app/static
       - ./mythic_backend/app:/usr/src/app/app
     ports:
       - "8001:8000"
-    depends_on:
-      database:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost:8000/health" ]
       interval: 30s
       timeout: 10s
       retries: 3
-    networks: [ mythic ]
-
-volumes:
-  postgres_data:
-  redis_data:
-
-
-networks:
-  mythic:
-    driver: bridge

@@ -2,7 +2,6 @@ import asyncio
 import httpx, logging, mimetypes
 from pathlib import Path
 from typing import List, Dict
-import time
 
 log = logging.getLogger("downloader")
 
@@ -20,7 +19,6 @@ def _collect_urls(items: List[Dict]) -> List[str]:
             walk(child)
 
     for root in items:
-        # Собираем URL из постов
         for p in root.get("latestPosts", []):
             walk(p)
         
@@ -34,6 +32,24 @@ def _collect_urls(items: List[Dict]) -> List[str]:
             # Если есть видео превью в сторисе
             if story.get("videoUrl"):
                 urls.append(story["videoUrl"])
+
+        # Собираем URL из актуального (highlights)
+        for highlight in root.get("highlights", []):
+            # Некоторые скриптеры отдают highlight.items
+            for item in highlight.get("items", []):
+                if item.get("displayUrl"):
+                    urls.append(item["displayUrl"])
+                if item.get("images"):
+                    urls.extend(item["images"])
+                if item.get("videoUrl"):
+                    urls.append(item["videoUrl"])
+            # На случай плоской структуры без items
+            if highlight.get("displayUrl"):
+                urls.append(highlight["displayUrl"])
+            if highlight.get("images"):
+                urls.extend(highlight["images"])
+            if highlight.get("videoUrl"):
+                urls.append(highlight["videoUrl"])
 
     # удаляем дубликаты, сохраняя порядок
     seen = set()
