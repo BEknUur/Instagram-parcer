@@ -56,6 +56,7 @@ async def start_scrape(
         "addParentData": True,         # Добавляем данные профиля
         "scrapeComments": True,        # ✅ ВКЛЮЧАЕМ сбор комментариев
         "commentsLimit": 100,          # ✅ До 100 комментариев на пост
+        "postsLimit": 50,              # ✅ До 50 постов (новый параметр)
         "scrapeStories": True,         # Собираем сторисы
         "storiesLimit": 10,            # До 10 сторисов
         "scrapeHighlights": True,      # ✅ Собираем актуальное (highlights)

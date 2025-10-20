@@ -621,3 +621,186 @@ h1 {
   font-size: 0.8rem;
   color: #666;
 }
+
+/* Стили для пагинации и поиска */
+.captions-section {
+  background: #ffffff;
+  padding: 2rem;
+  border-radius: 12px;
+  margin: 2rem 0;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+/* Поисковая строка */
+.captions-section input[type="text"] {
+  width: 100%;
+  padding: 0.75rem;
+  border-radius: 0.5rem;
+  border: 2px solid #e0e0e0;
+  font-size: 1rem;
+  font-family: inherit;
+  transition: border-color 0.3s;
+  margin-bottom: 1rem;
+}
+
+.captions-section input[type="text"]:focus {
+  outline: none;
+  border-color: #646cff;
+  box-shadow: 0 0 0 3px rgba(100, 108, 255, 0.1);
+}
+
+/* Контрол постов на странице */
+.captions-section select {
+  padding: 0.5rem;
+  border-radius: 0.3rem;
+  border: 1px solid #ddd;
+  font-size: 0.9rem;
+  font-family: inherit;
+  background: white;
+  cursor: pointer;
+  transition: border-color 0.3s;
+}
+
+.captions-section select:focus {
+  outline: none;
+  border-color: #646cff;
+}
+
+/* Кнопки пагинации */
+.captions-section button {
+  transition: all 0.2s;
+}
+
+.captions-section button:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+.captions-section button:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.captions-section button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Список постов */
+.captions-list {
+  display: grid;
+  gap: 1.5rem;
+  margin-top: 1rem;
+}
+
+.caption-card {
+  background: #f9f9f9;
+  padding: 1.5rem;
+  border-radius: 8px;
+  border-left: 4px solid #646cff;
+  transition: all 0.3s;
+}
+
+.caption-card:hover {
+  background: #f3f3f3;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+/* Контроли комментариев */
+.comments-controls {
+  display: flex;
+  gap: 0.75rem;
+  margin-top: 1rem;
+  align-items: center;
+}
+
+.comment-limit-input {
+  width: 80px;
+  padding: 0.5rem;
+  border: 1px solid #ddd;
+  border-radius: 0.3rem;
+  font-size: 0.9rem;
+  font-family: inherit;
+}
+
+.load-comments-btn {
+  padding: 0.5rem 1rem;
+  background: #646cff;
+  color: white;
+  border: none;
+  border-radius: 0.3rem;
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-weight: 500;
+  transition: all 0.2s;
+}
+
+.load-comments-btn:hover:not(:disabled) {
+  background: #535bf2;
+}
+
+.load-comments-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Ошибка загрузки комментариев */
+.comments-error {
+  color: #d32f2f;
+  background: #ffebee;
+  padding: 0.75rem;
+  border-radius: 0.3rem;
+  margin-top: 0.75rem;
+  font-size: 0.9rem;
+}
+
+/* Секция комментариев */
+.post-comments-section {
+  background: white;
+  padding: 1rem;
+  margin-top: 1rem;
+  border-radius: 0.5rem;
+  border: 1px solid #e0e0e0;
+}
+
+.post-comments-section h4 {
+  margin: 0 0 1rem 0;
+  color: #333;
+}
+
+.post-comments-list {
+  display: grid;
+  gap: 1rem;
+  max-height: 400px;
+  overflow-y: auto;
+  padding-right: 0.5rem;
+}
+
+.comment-item {
+  padding: 0.75rem;
+  background: #fafafa;
+  border-radius: 0.3rem;
+  border-left: 2px solid #e0e0e0;
+}
+
+.comment-author {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+/* Пагинация */
+@media (max-width: 768px) {
+  .captions-section {
+    padding: 1rem;
+  }
+
+  .comments-controls {
+    flex-direction: column;
+  }
+
+  .comment-limit-input,
+  .load-comments-btn {
+    width: 100%;
+  }
+}

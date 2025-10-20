@@ -54,6 +54,9 @@ function App() {
   const [showProfile, setShowProfile] = useState(true)
   const [postComments, setPostComments] = useState<PostComments>({})
   const [commentLimits, setCommentLimits] = useState<{[key: string]: number}>({})
+  const [postsPerPage, setPostsPerPage] = useState(15)
+  const [currentPage, setCurrentPage] = useState(1)
+  const [searchPostsText, setSearchPostsText] = useState('')
 
   // Определяем API URL в зависимости от окружения
   const API_BASE_URL = window.location.hostname === 'localhost' 
@@ -177,6 +180,28 @@ function App() {
     return captions
   }
 
+  // Фильтруем посты по поисковому тексту
+  const filterCaptions = (captions: PostCaption[]): PostCaption[] => {
+    if (!searchPostsText.trim()) return captions
+    const search = searchPostsText.toLowerCase()
+    return captions.filter(caption => 
+      caption.text.toLowerCase().includes(search) ||
+      caption.shortCode?.toLowerCase().includes(search)
+    )
+  }
+
+  // Пагинация постов
+  const getPaginatedCaptions = (captions: PostCaption[]): { captions: PostCaption[], totalPages: number } => {
+    const filtered = filterCaptions(captions)
+    const totalPages = Math.ceil(filtered.length / postsPerPage)
+    const startIndex = (currentPage - 1) * postsPerPage
+    const endIndex = startIndex + postsPerPage
+    return {
+      captions: filtered.slice(startIndex, endIndex),
+      totalPages
+    }
+  }
+
   return (
     <div className="container">
       <h1>Instagram Parser</h1>
@@ -297,11 +322,14 @@ function App() {
 
           {/* Тексты постов */}
           {(() => {
-            const captions = extractCaptions(result.data)
-            return captions.length > 0 && (
+            const allCaptions = extractCaptions(result.data)
+            const { captions, totalPages } = getPaginatedCaptions(allCaptions)
+            const filteredTotal = filterCaptions(allCaptions).length
+            
+            return allCaptions.length > 0 && (
               <div className="captions-section">
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-                  <h3>📝 Тексты постов ({captions.length})</h3>
+                  <h3>📝 Тексты постов ({filteredTotal}/{allCaptions.length})</h3>
                   <button 
                     onClick={() => setShowCaptions(!showCaptions)}
                     style={{ padding: '0.5rem 1rem', fontSize: '0.9rem' }}
@@ -309,84 +337,204 @@ function App() {
                     {showCaptions ? '🔼 Скрыть' : '🔽 Показать'}
                   </button>
                 </div>
+                
                 {showCaptions && (
-                  <div className="captions-list">
-                    {captions.map((caption, index) => {
-                      const shortCode = caption.shortCode || ''
-                      const commentsState = postComments[shortCode]
-                      
-                      return (
-                        <div key={index} className="caption-card">
-                          <div className="caption-header">
-                            <span className="caption-number">
-                              Пост #{index + 1}
-                              {shortCode && <span className="shortcode"> ({shortCode})</span>}
-                            </span>
-                            <span className="caption-date">
-                              {caption.timestamp ? new Date(caption.timestamp).toLocaleDateString('ru-RU') : 'Дата неизвестна'}
-                            </span>
-                          </div>
-                          <p className="caption-text">{caption.text}</p>
-                          <div className="caption-stats">
-                            <span>❤️ {caption.likesCount.toLocaleString()}</span>
-                            <span>💬 {caption.commentsCount.toLocaleString()}</span>
-                          </div>
+                  <>
+                    {/* Поисковая строка */}
+                    <div style={{ marginBottom: '1rem' }}>
+                      <input
+                        type="text"
+                        placeholder="🔍 Поиск по тексту или shortCode..."
+                        value={searchPostsText}
+                        onChange={(e) => {
+                          setSearchPostsText(e.target.value)
+                          setCurrentPage(1) // Сбрасываем на первую страницу при поиске
+                        }}
+                        style={{
+                          width: '100%',
+                          padding: '0.75rem',
+                          borderRadius: '0.5rem',
+                          border: '1px solid #ddd',
+                          fontSize: '1rem',
+                          fontFamily: 'inherit'
+                        }}
+                      />
+                    </div>
+
+                    {/* Настройки отображения */}
+                    <div style={{ display: 'flex', gap: '1rem', marginBottom: '1rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <label htmlFor="posts-per-page" style={{ fontSize: '0.9rem' }}>Постов на странице:</label>
+                        <select
+                          id="posts-per-page"
+                          value={postsPerPage}
+                          onChange={(e) => {
+                            setPostsPerPage(Number(e.target.value))
+                            setCurrentPage(1)
+                          }}
+                          style={{
+                            padding: '0.5rem',
+                            borderRadius: '0.3rem',
+                            border: '1px solid #ddd',
+                            fontSize: '0.9rem'
+                          }}
+                        >
+                          <option value={10}>10</option>
+                          <option value={15}>15</option>
+                          <option value={25}>25</option>
+                          <option value={50}>50</option>
+                        </select>
+                      </div>
+                      <span style={{ fontSize: '0.9rem', color: '#666' }}>
+                        Страница {currentPage} из {totalPages > 0 ? totalPages : 1}
+                      </span>
+                    </div>
+
+                    {/* Список постов */}
+                    <div className="captions-list">
+                      {captions.length > 0 ? (
+                        captions.map((caption, index) => {
+                          const shortCode = caption.shortCode || ''
+                          const commentsState = postComments[shortCode]
+                          const globalIndex = (currentPage - 1) * postsPerPage + index + 1
                           
-                          {/* Кнопка для загрузки комментариев */}
-                          {shortCode && (
-                            <div className="comments-controls">
-                              <input
-                                type="number"
-                                min="1"
-                                max="500"
-                                value={commentLimits[shortCode] || 50}
-                                onChange={(e) => setCommentLimits(prev => ({
-                                  ...prev,
-                                  [shortCode]: Number(e.target.value)
-                                }))}
-                                className="comment-limit-input"
-                                placeholder="Лимит"
-                              />
-                              <button
-                                onClick={() => loadPostComments(shortCode)}
-                                disabled={commentsState?.loading}
-                                className="load-comments-btn"
-                              >
-                                {commentsState?.loading ? '⏳ Загрузка...' : '💬 Загрузить комментарии'}
-                              </button>
-                            </div>
-                          )}
-                          
-                          {/* Отображение комментариев */}
-                          {commentsState?.error && (
-                            <div className="comments-error">❌ {commentsState.error}</div>
-                          )}
-                          
-                          {commentsState?.comments && commentsState.comments.length > 0 && (
-                            <div className="post-comments-section">
-                              <h4>💬 Комментарии ({commentsState.comments.length})</h4>
-                              <div className="post-comments-list">
-                                {commentsState.comments.map((comment: any, cIndex: number) => (
-                                  <div key={cIndex} className="comment-item">
-                                    <div className="comment-author">
-                                      <strong>@{comment.ownerUsername || 'Аноним'}</strong>
-                                      <span className="comment-date">
-                                        {comment.timestamp ? new Date(comment.timestamp).toLocaleDateString('ru-RU') : ''}
-                                      </span>
-                                    </div>
-                                    <p className="comment-text">{comment.text}</p>
-                                    {comment.likesCount > 0 && (
-                                      <span className="comment-likes">❤️ {comment.likesCount}</span>
-                                    )}
-                                  </div>
-                                ))}
+                          return (
+                            <div key={index} className="caption-card">
+                              <div className="caption-header">
+                                <span className="caption-number">
+                                  Пост #{globalIndex}
+                                  {shortCode && <span className="shortcode"> ({shortCode})</span>}
+                                </span>
+                                <span className="caption-date">
+                                  {caption.timestamp ? new Date(caption.timestamp).toLocaleDateString('ru-RU') : 'Дата неизвестна'}
+                                </span>
                               </div>
+                              <p className="caption-text">{caption.text}</p>
+                              <div className="caption-stats">
+                                <span>❤️ {caption.likesCount.toLocaleString()}</span>
+                                <span>💬 {caption.commentsCount.toLocaleString()}</span>
+                              </div>
+                              
+                              {/* Кнопка для загрузки комментариев */}
+                              {shortCode && (
+                                <div className="comments-controls">
+                                  <input
+                                    type="number"
+                                    min="1"
+                                    max="500"
+                                    value={commentLimits[shortCode] || 50}
+                                    onChange={(e) => setCommentLimits(prev => ({
+                                      ...prev,
+                                      [shortCode]: Number(e.target.value)
+                                    }))}
+                                    className="comment-limit-input"
+                                    placeholder="Лимит"
+                                  />
+                                  <button
+                                    onClick={() => loadPostComments(shortCode)}
+                                    disabled={commentsState?.loading}
+                                    className="load-comments-btn"
+                                  >
+                                    {commentsState?.loading ? '⏳ Загрузка...' : '💬 Загрузить комментарии'}
+                                  </button>
+                                </div>
+                              )}
+                              
+                              {/* Отображение комментариев */}
+                              {commentsState?.error && (
+                                <div className="comments-error">❌ {commentsState.error}</div>
+                              )}
+                              
+                              {commentsState?.comments && commentsState.comments.length > 0 && (
+                                <div className="post-comments-section">
+                                  <h4>💬 Комментарии ({commentsState.comments.length})</h4>
+                                  <div className="post-comments-list">
+                                    {commentsState.comments.map((comment: any, cIndex: number) => (
+                                      <div key={cIndex} className="comment-item">
+                                        <div className="comment-author">
+                                          <strong>@{comment.ownerUsername || 'Аноним'}</strong>
+                                          <span className="comment-date">
+                                            {comment.timestamp ? new Date(comment.timestamp).toLocaleDateString('ru-RU') : ''}
+                                          </span>
+                                        </div>
+                                        <p className="comment-text">{comment.text}</p>
+                                        {comment.likesCount > 0 && (
+                                          <span className="comment-likes">❤️ {comment.likesCount}</span>
+                                        )}
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
                             </div>
-                          )}
-                        </div>
-                      )
-                    })}
-                  </div>
+                          )
+                        })
+                      ) : (
+                        <p style={{ textAlign: 'center', color: '#666', padding: '2rem' }}>
+                          {searchPostsText ? 'По вашему запросу постов не найдено' : 'Нет постов для отображения'}
+                        </p>
+                      )}
+                    </div>
+
+                    {/* Пагинация */}
+                    {totalPages > 1 && (
+                      <div style={{ 
+                        display: 'flex', 
+                        justifyContent: 'center', 
+                        gap: '0.5rem', 
+                        marginTop: '2rem',
+                        flexWrap: 'wrap'
+                      }}>
+                        <button
+                          onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                          disabled={currentPage === 1}
+                          style={{
+                            padding: '0.5rem 1rem',
+                            borderRadius: '0.3rem',
+                            border: '1px solid #ddd',
+                            background: currentPage === 1 ? '#f0f0f0' : '#fff',
+                            cursor: currentPage === 1 ? 'not-allowed' : 'pointer',
+                            opacity: currentPage === 1 ? 0.5 : 1
+                          }}
+                        >
+                          ← Предыдущая
+                        </button>
+                        
+                        {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => (
+                          <button
+                            key={page}
+                            onClick={() => setCurrentPage(page)}
+                            style={{
+                              padding: '0.5rem 0.75rem',
+                              borderRadius: '0.3rem',
+                              border: '1px solid #ddd',
+                              background: currentPage === page ? '#007bff' : '#fff',
+                              color: currentPage === page ? '#fff' : '#000',
+                              cursor: 'pointer',
+                              fontWeight: currentPage === page ? 'bold' : 'normal'
+                            }}
+                          >
+                            {page}
+                          </button>
+                        ))}
+                        
+                        <button
+                          onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                          disabled={currentPage === totalPages}
+                          style={{
+                            padding: '0.5rem 1rem',
+                            borderRadius: '0.3rem',
+                            border: '1px solid #ddd',
+                            background: currentPage === totalPages ? '#f0f0f0' : '#fff',
+                            cursor: currentPage === totalPages ? 'not-allowed' : 'pointer',
+                            opacity: currentPage === totalPages ? 0.5 : 1
+                          }}
+                        >
+                          Следующая →
+                        </button>
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
             )
