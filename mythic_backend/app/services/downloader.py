@@ -10,6 +10,17 @@ log = logging.getLogger("downloader")
 def _collect_urls(items: List[Dict]) -> List[str]:
     """Ищем displayUrl и images во всех latestPosts, childPosts и stories."""
     urls: list[str] = []
+    
+    log.info(f"🔍 Обрабатываем {len(items)} элементов для поиска изображений")
+    
+    # Логируем структуру первого элемента для отладки
+    if items and len(items) > 0:
+        first_item_keys = list(items[0].keys())
+        log.info(f"Ключи первого элемента: {first_item_keys[:10]}")
+        if "latestPosts" in items[0]:
+            log.info(f"latestPosts найдены: {len(items[0]['latestPosts'])} постов")
+        else:
+            log.warning("⚠️ latestPosts отсутствует в структуре данных!")
 
     def walk(post: Dict):
         if post.get("displayUrl"):
@@ -19,8 +30,14 @@ def _collect_urls(items: List[Dict]) -> List[str]:
             walk(child)
 
     for root in items:
-        for p in root.get("latestPosts", []):
-            walk(p)
+        # Проверяем, есть ли latestPosts (профильный режим)
+        if "latestPosts" in root:
+            for p in root.get("latestPosts", []):
+                walk(p)
+        # Если нет latestPosts, возможно это режим "posts" и root - сам пост
+        elif "displayUrl" in root or "images" in root:
+            log.info("🔍 Обнаружен режим posts - обрабатываем как напрямую пост")
+            walk(root)
         
         # Собираем URL из сторисов
         for story in root.get("stories", []):

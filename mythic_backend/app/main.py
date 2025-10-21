@@ -85,9 +85,10 @@ async def start_scrape(
                 # Получаем данные
                 items = await fetch_items(dataset_id, limit=run_input["resultsLimit"])
                 
-                # Сохраняем данные локально (опционально)
+                # Сохраняем данные локально
                 run_dir = Path("data") / run_id
                 run_dir.mkdir(parents=True, exist_ok=True)
+                log.info(f"📁 Создана директория: {run_dir.absolute()}")
                 
                 user_meta = {
                     "user_id": user_identifier,
@@ -98,9 +99,11 @@ async def start_scrape(
                 }
                 (run_dir / "user_meta.json").write_text(json.dumps(user_meta, ensure_ascii=False, indent=2), encoding="utf-8")
                 (run_dir / "posts.json").write_text(json.dumps(items, ensure_ascii=False, indent=2), encoding="utf-8")
+                log.info(f"💾 Сохранены user_meta.json и posts.json ({len(items)} элементов)")
                 
                 # Загрузка изображений и OCR в фоне через BackgroundTasks
                 images_dir = run_dir / "images"
+                log.info(f"🚀 Запуск фоновой загрузки изображений в {images_dir}")
                 background_tasks.add_task(download_photos_background, items, images_dir)
                 
                 log.info(f"✅ Синхронный парсинг завершен для {username}. Получено {len(items)} элементов. OCR запущен в фоне.")
