@@ -50,18 +50,9 @@ async def start_scrape(
 
     run_input = {
         "directUrls":     [clean_url],
-        "resultsType":    "details",
-        "resultsLimit": 300,           # ✅ Максимум 300 элементов (увеличено для получения большего количества постов)
-        "searchLimit": 1,              # Только один профиль  
-        "addParentData": True,         # Добавляем данные профиля
-        "scrapeComments": True,        # ✅ ВКЛЮЧАЕМ сбор комментариев
-        "commentsLimit": 100,          # ✅ До 100 комментариев на пост
-        "postsLimit": 100,             # ✅ До 100 постов (увеличено с 50)
-        "scrapeStories": True,         # Собираем сторисы
-        "storiesLimit": 10,            # До 10 сторисов
-        "scrapeHighlights": True,      # ✅ Собираем актуальное (highlights)
-        "highlightsLimit": 20,         # Лимит элементов в актуальном
-        "enhanceUserSearchWithFacebookPage": False,  # Отключаем Facebook
+        "resultsType":    "posts",
+        "resultsLimit": 50,
+        "searchLimit": 1,              # Только один профиль
         "searchType": "user",
     }
 
