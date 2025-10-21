@@ -8,86 +8,37 @@ log = logging.getLogger("downloader")
 
 # ─────────────────── сбор ссылок ────────────────────────────────────────────
 def _collect_urls(items: List[Dict]) -> List[str]:
-    """Собираем URL фото ТОЛЬКО из обычных постов (не reels/видео)."""
+    """Просто берем фото (displayUrl) из всех постов."""
     urls: list[str] = []
     
-    log.info(f"🔍 Обрабатываем {len(items)} элементов для поиска изображений")
+    log.info(f"🔍 Обрабатываем {len(items)} элементов")
     
-    # Логируем структуру для отладки
-    if items and len(items) > 0:
-        first_item_keys = list(items[0].keys())
-        log.info(f"Ключи первого элемента: {first_item_keys}")
-        
-        # Проверяем разные форматы данных
-        if "latestPosts" in items[0]:
-            log.info(f"✅ Формат профиля: найдено {len(items[0].get('latestPosts', []))} постов")
-        elif "displayUrl" in items[0] or "images" in items[0]:
-            log.info(f"✅ Формат постов: элементы являются постами напрямую")
-        else:
-            log.warning(f"⚠️ Неизвестный формат данных!")
-
-    for idx, item in enumerate(items):
-        # Вариант 1: Данные - профиль с latestPosts
+    for item in items:
+        # Вариант 1: Профиль с latestPosts
         if "latestPosts" in item:
-            log.info(f"📦 Элемент {idx}: профиль, обрабатываем latestPosts")
             posts = item.get("latestPosts", [])
-            for post_idx, post in enumerate(posts):
-                post_type = post.get("type", "Unknown")
-                
-                # ВАЖНО: Берем фото ТОЛЬКО из Image и Sidecar (карусели)
-                # Игнорируем Video, Reel, IGTV - даже если там есть превью
-                if post_type not in ["Image", "Sidecar"]:
-                    log.info(f"  ⏭️ Пост {post_idx}: {post_type} - НЕ фото, пропускаем")
-                    continue
-                
-                log.info(f"  📸 Пост {post_idx}: {post_type} - обрабатываем фото")
-                
-                # Берем главное изображение
+            log.info(f"📦 Найдено {len(posts)} постов в профиле")
+            
+            for post in posts:
+                # Берем displayUrl если есть
                 if post.get("displayUrl"):
                     urls.append(post["displayUrl"])
-                    log.debug(f"    ✅ Добавлено displayUrl")
                 
-                # Берем все изображения из массива (для каруселей)
-                if post.get("images"):
-                    image_count = len(post["images"])
-                    urls.extend(post["images"])
-                    log.debug(f"    ✅ Добавлено {image_count} изображений из массива")
-                
-                # Обрабатываем childPosts для каруселей
-                for child_idx, child in enumerate(post.get("childPosts", [])):
+                # Берем childPosts для каруселей
+                for child in post.get("childPosts", []):
                     if child.get("displayUrl"):
                         urls.append(child["displayUrl"])
-                        log.debug(f"    ✅ Добавлено childPost {child_idx}")
         
-        # Вариант 2: Данные - это уже посты напрямую (режим "posts")
-        elif "displayUrl" in item or "images" in item:
-            post_type = item.get("type", "Unknown")
+        # Вариант 2: Прямые посты (режим "posts")
+        elif "displayUrl" in item:
+            urls.append(item["displayUrl"])
             
-            # ВАЖНО: Берем фото ТОЛЬКО из Image и Sidecar
-            if post_type not in ["Image", "Sidecar"]:
-                log.info(f"  ⏭️ Элемент {idx}: {post_type} - НЕ фото, пропускаем")
-                continue
-            
-            log.info(f"  📸 Элемент {idx}: {post_type} - обрабатываем фото")
-            
-            # Берем главное изображение
-            if item.get("displayUrl"):
-                urls.append(item["displayUrl"])
-                log.debug(f"    ✅ Добавлено displayUrl")
-            
-            # Берем все изображения из массива
-            if item.get("images"):
-                image_count = len(item["images"])
-                urls.extend(item["images"])
-                log.debug(f"    ✅ Добавлено {image_count} изображений")
-            
-            # Обрабатываем childPosts
-            for child_idx, child in enumerate(item.get("childPosts", [])):
+            # Берем childPosts
+            for child in item.get("childPosts", []):
                 if child.get("displayUrl"):
                     urls.append(child["displayUrl"])
-                    log.debug(f"    ✅ Добавлено childPost {child_idx}")
 
-    # Удаляем дубликаты, сохраняя порядок
+    # Удаляем дубликаты
     seen = set()
     out = []
     for u in urls:
@@ -101,7 +52,7 @@ def _collect_urls(items: List[Dict]) -> List[str]:
         log.info(f"⚠️ Найдено {len(out)} фото, ограничиваем до {max_photos}")
         out = out[:max_photos]
     
-    log.info(f"✅ Итого будет загружено: {len(out)} фото")
+    log.info(f"✅ Будет загружено: {len(out)} фото")
     return out
 
 
