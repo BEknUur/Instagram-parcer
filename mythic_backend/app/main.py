@@ -1,5 +1,5 @@
 # app/main.py
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from pathlib import Path
 
@@ -41,7 +41,8 @@ def health_check():
 @app.get("/start-scrape")
 async def start_scrape(
     url: AnyUrl,
-    username: str
+    username: str,
+    background_tasks: BackgroundTasks
 ):
     """Синхронный парсинг Instagram профиля - возвращает полный JSON сразу"""
     clean_url = str(url).rstrip("/")
@@ -98,11 +99,11 @@ async def start_scrape(
                 (run_dir / "user_meta.json").write_text(json.dumps(user_meta, ensure_ascii=False, indent=2), encoding="utf-8")
                 (run_dir / "posts.json").write_text(json.dumps(items, ensure_ascii=False, indent=2), encoding="utf-8")
                 
-                # Загрузка изображений и OCR в фоне
+                # Загрузка изображений и OCR в фоне через BackgroundTasks
                 images_dir = run_dir / "images"
-                asyncio.create_task(download_photos_async(items, images_dir))
+                background_tasks.add_task(download_photos_background, items, images_dir)
                 
-                log.info(f"✅ Синхронный парсинг завершен для {username}. Получено {len(items)} элементов")
+                log.info(f"✅ Синхронный парсинг завершен для {username}. Получено {len(items)} элементов. OCR запущен в фоне.")
                 
                 # Возвращаем полный JSON
                 return {
@@ -230,14 +231,14 @@ async def scrape_comments(
         raise HTTPException(500, str(e))
 
 
-async def download_photos_async(items, images_dir):
-    """Асинхронная загрузка фотографий с OCR"""
+def download_photos_background(items, images_dir):
+    """Фоновая загрузка фотографий с OCR (синхронная для BackgroundTasks)"""
     try:
-        # download_photos теперь синхронная функция, запускаем в потоке
-        await asyncio.to_thread(download_photos, items, images_dir)
-        log.info(f"📸 Изображения загружены и OCR выполнен в {images_dir}")
+        log.info(f"🚀 Начинаем фоновую загрузку изображений и OCR для {images_dir}")
+        download_photos(items, images_dir)
+        log.info(f"✅ Изображения загружены и OCR выполнен в {images_dir}")
     except Exception as e:
-        log.error(f"❌ Ошибка загрузки изображений: {e}")
+        log.error(f"❌ Ошибка фоновой загрузки изображений: {e}")
 
 
 @app.get("/get-ocr-results")

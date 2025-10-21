@@ -74,6 +74,7 @@ function App() {
   const [searchPostsText, setSearchPostsText] = useState('')
   const [ocrData, setOcrData] = useState<OCRData | null>(null)
   const [ocrLoading, setOcrLoading] = useState(false)
+  const [ocrAttempt, setOcrAttempt] = useState(0)
 
   // Определяем API URL в зависимости от окружения
   const API_BASE_URL = window.location.hostname === 'localhost'
@@ -109,10 +110,10 @@ function App() {
       const data = await response.json()
       setResult(data)
 
-      // Пытаемся загрузить OCR результаты после небольшой задержки
-      // (так как OCR выполняется в фоне)
+      // Пытаемся загрузить OCR результаты с повторными попытками
+      // (так как OCR выполняется в фоне и может занять время)
       if (data.runId) {
-        setTimeout(() => loadOCRResults(data.runId), 5000)
+        loadOCRResultsWithRetry(data.runId)
       }
 
     } catch (err: any) {
@@ -122,7 +123,45 @@ function App() {
     }
   }
 
-  // Функция для загрузки OCR результатов
+  // Функция для загрузки OCR результатов с повторными попытками
+  const loadOCRResultsWithRetry = async (runId: string, attempt: number = 1, maxAttempts: number = 6) => {
+    setOcrLoading(true)
+    setOcrAttempt(attempt)
+
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/get-ocr-results?run_id=${encodeURIComponent(runId)}`
+      )
+
+      if (response.ok) {
+        const data = await response.json()
+        setOcrData(data.ocr_results)
+        console.log(`✅ Загружено OCR для ${data.images_with_text}/${data.total_images} изображений`)
+        setOcrLoading(false)
+        setOcrAttempt(0)
+      } else if (attempt < maxAttempts) {
+        // Повторяем попытку с увеличивающейся задержкой
+        const delay = attempt * 10000 // 10, 20, 30, 40, 50 секунд
+        console.log(`OCR попытка ${attempt}/${maxAttempts}, следующая попытка через ${delay / 1000}с...`)
+        setTimeout(() => loadOCRResultsWithRetry(runId, attempt + 1, maxAttempts), delay)
+      } else {
+        console.log('OCR результаты недоступны после всех попыток')
+        setOcrLoading(false)
+        setOcrAttempt(0)
+      }
+    } catch (err: any) {
+      if (attempt < maxAttempts) {
+        const delay = attempt * 10000
+        setTimeout(() => loadOCRResultsWithRetry(runId, attempt + 1, maxAttempts), delay)
+      } else {
+        console.log('OCR результаты недоступны:', err.message)
+        setOcrLoading(false)
+        setOcrAttempt(0)
+      }
+    }
+  }
+
+  // Функция для загрузки OCR результатов (для ручного вызова)
   const loadOCRResults = async (runId: string) => {
     setOcrLoading(true)
     try {
@@ -332,7 +371,7 @@ function App() {
               )}
               {ocrLoading && (
                 <div style={{ fontSize: '0.9rem', color: '#666' }}>
-                  ⏳ Загрузка OCR результатов...
+                  ⏳ {ocrAttempt > 0 ? `Ожидание OCR (попытка ${ocrAttempt}/6)...` : 'Загрузка OCR результатов...'}
                 </div>
               )}
               {!ocrData && !ocrLoading && result.runId && (
