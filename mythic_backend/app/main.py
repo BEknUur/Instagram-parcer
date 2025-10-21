@@ -1,6 +1,7 @@
 # app/main.py
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from pathlib import Path
 
 import asyncio
@@ -277,4 +278,76 @@ async def get_ocr_results(run_id: str):
         raise
     except Exception as e:
         log.error(f"❌ Ошибка получения OCR результатов: {e}")
+        raise HTTPException(500, str(e))
+
+
+@app.get("/get-images")
+async def get_images(run_id: str):
+    """
+    Получить список всех изображений для run_id
+    
+    Args:
+        run_id: ID запуска парсинга
+    """
+    try:
+        run_dir = Path("data") / run_id / "images"
+        
+        if not run_dir.exists():
+            raise HTTPException(404, "Папка с изображениями не найдена")
+        
+        # Собираем все изображения (кроме placeholder)
+        images = []
+        for img_file in sorted(run_dir.glob("*.jpg")):
+            if not img_file.name.endswith("_placeholder.jpg"):
+                images.append(img_file.name)
+        
+        for img_file in sorted(run_dir.glob("*.jpeg")):
+            if not img_file.name.endswith("_placeholder.jpeg"):
+                images.append(img_file.name)
+        
+        for img_file in sorted(run_dir.glob("*.png")):
+            if not img_file.name.endswith("_placeholder.png"):
+                images.append(img_file.name)
+        
+        log.info(f"📸 Найдено {len(images)} изображений для run_id={run_id}")
+        
+        return {
+            "success": True,
+            "run_id": run_id,
+            "total_images": len(images),
+            "images": images
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.error(f"❌ Ошибка получения списка изображений: {e}")
+        raise HTTPException(500, str(e))
+
+
+@app.get("/image/{run_id}/{filename}")
+async def get_image(run_id: str, filename: str):
+    """
+    Получить конкретное изображение
+    
+    Args:
+        run_id: ID запуска парсинга
+        filename: Имя файла изображения
+    """
+    try:
+        # Безопасность: проверяем, что filename не содержит путей
+        if "/" in filename or "\\" in filename or ".." in filename:
+            raise HTTPException(400, "Недопустимое имя файла")
+        
+        image_path = Path("data") / run_id / "images" / filename
+        
+        if not image_path.exists():
+            raise HTTPException(404, "Изображение не найдено")
+        
+        return FileResponse(image_path)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.error(f"❌ Ошибка отдачи изображения: {e}")
         raise HTTPException(500, str(e))

@@ -75,6 +75,8 @@ function App() {
   const [ocrData, setOcrData] = useState<OCRData | null>(null)
   const [ocrLoading, setOcrLoading] = useState(false)
   const [ocrAttempt, setOcrAttempt] = useState(0)
+  const [images, setImages] = useState<string[]>([])
+  const [showGallery, setShowGallery] = useState(false)
 
   // Определяем API URL в зависимости от окружения
   const API_BASE_URL = window.location.hostname === 'localhost'
@@ -123,6 +125,25 @@ function App() {
     }
   }
 
+  // Функция для загрузки списка изображений
+  const loadImages = async (runId: string) => {
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/get-images?run_id=${encodeURIComponent(runId)}`
+      )
+
+      if (response.ok) {
+        const data = await response.json()
+        setImages(data.images || [])
+        console.log(`✅ Загружено ${data.total_images} изображений`)
+      } else {
+        console.log('Изображения пока недоступны')
+      }
+    } catch (err: any) {
+      console.log('Ошибка загрузки изображений:', err.message)
+    }
+  }
+
   // Функция для загрузки OCR результатов с повторными попытками
   const loadOCRResultsWithRetry = async (runId: string, attempt: number = 1, maxAttempts: number = 6) => {
     setOcrLoading(true)
@@ -139,6 +160,9 @@ function App() {
         console.log(`✅ Загружено OCR для ${data.images_with_text}/${data.total_images} изображений`)
         setOcrLoading(false)
         setOcrAttempt(0)
+
+        // Также загружаем список изображений
+        loadImages(runId)
       } else if (attempt < maxAttempts) {
         // Повторяем попытку с увеличивающейся задержкой
         const delay = attempt * 10000 // 10, 20, 30, 40, 50 секунд
@@ -392,6 +416,88 @@ function App() {
               )}
             </div>
           </div>
+
+          {/* Галерея фотографий */}
+          {images.length > 0 && (
+            <div className="profile-section" style={{ marginTop: '2rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                <h3>📸 Галерея фотографий ({images.length})</h3>
+                <button
+                  onClick={() => setShowGallery(!showGallery)}
+                  style={{ padding: '0.5rem 1rem', fontSize: '0.9rem' }}
+                >
+                  {showGallery ? '🔼 Скрыть' : '🔽 Показать'}
+                </button>
+              </div>
+              {showGallery && (
+                <div style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
+                  gap: '1rem',
+                  marginTop: '1rem'
+                }}>
+                  {images.map((imageName, index) => {
+                    const imageUrl = `${API_BASE_URL}/image/${result.runId}/${imageName}`
+                    const ocrResult = ocrData?.[imageName]
+
+                    return (
+                      <div key={index} style={{
+                        border: '1px solid #ddd',
+                        borderRadius: '0.5rem',
+                        overflow: 'hidden',
+                        backgroundColor: '#fff',
+                        boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+                      }}>
+                        <img
+                          src={imageUrl}
+                          alt={`Photo ${index + 1}`}
+                          style={{
+                            width: '100%',
+                            height: '200px',
+                            objectFit: 'cover',
+                            cursor: 'pointer'
+                          }}
+                          onClick={() => window.open(imageUrl, '_blank')}
+                        />
+                        <div style={{ padding: '0.75rem' }}>
+                          <div style={{ fontSize: '0.85rem', color: '#666', marginBottom: '0.5rem' }}>
+                            {imageName}
+                          </div>
+                          {ocrResult && ocrResult.has_text && (
+                            <div style={{
+                              fontSize: '0.85rem',
+                              padding: '0.5rem',
+                              backgroundColor: '#f8f9fa',
+                              borderRadius: '0.3rem',
+                              borderLeft: '3px solid #28a745'
+                            }}>
+                              <div style={{ fontWeight: 'bold', marginBottom: '0.25rem', color: '#28a745' }}>
+                                ✅ Текст ({Math.round(ocrResult.confidence * 100)}%):
+                              </div>
+                              <div style={{
+                                fontSize: '0.8rem',
+                                color: '#333',
+                                maxHeight: '60px',
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis'
+                              }}>
+                                {ocrResult.text}
+                              </div>
+                            </div>
+                          )}
+                          {ocrResult && !ocrResult.has_text && (
+                            <div style={{ fontSize: '0.8rem', color: '#999', fontStyle: 'italic' }}>
+                              Текст не обнаружен
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Человеко-читаемая информация о профиле */}
           {(() => {
