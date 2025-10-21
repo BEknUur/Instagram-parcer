@@ -8,73 +8,100 @@ log = logging.getLogger("downloader")
 
 # ─────────────────── сбор ссылок ────────────────────────────────────────────
 def _collect_urls(items: List[Dict]) -> List[str]:
-    """Ищем displayUrl и images во всех latestPosts, childPosts и stories."""
+    """Собираем URL фото ТОЛЬКО из обычных постов (не reels/видео)."""
     urls: list[str] = []
     
     log.info(f"🔍 Обрабатываем {len(items)} элементов для поиска изображений")
     
-    # Логируем структуру первого элемента для отладки
+    # Логируем структуру для отладки
     if items and len(items) > 0:
         first_item_keys = list(items[0].keys())
-        log.info(f"Ключи первого элемента: {first_item_keys[:10]}")
-        if "latestPosts" in items[0]:
-            log.info(f"latestPosts найдены: {len(items[0]['latestPosts'])} постов")
-        else:
-            log.warning("⚠️ latestPosts отсутствует в структуре данных!")
-
-    def walk(post: Dict):
-        if post.get("displayUrl"):
-            urls.append(post["displayUrl"])
-        urls.extend(post.get("images", []))
-        for child in post.get("childPosts", []):
-            walk(child)
-
-    for root in items:
-        # Проверяем, есть ли latestPosts (профильный режим)
-        if "latestPosts" in root:
-            for p in root.get("latestPosts", []):
-                walk(p)
-        # Если нет latestPosts, возможно это режим "posts" и root - сам пост
-        elif "displayUrl" in root or "images" in root:
-            log.info("🔍 Обнаружен режим posts - обрабатываем как напрямую пост")
-            walk(root)
+        log.info(f"Ключи первого элемента: {first_item_keys}")
         
-        # Собираем URL из сторисов
-        for story in root.get("stories", []):
-            if story.get("displayUrl"):
-                urls.append(story["displayUrl"])
-            # Если есть массив изображений в сторисе
-            if story.get("images"):
-                urls.extend(story["images"])
-            # Если есть видео превью в сторисе
-            if story.get("videoUrl"):
-                urls.append(story["videoUrl"])
+        # Проверяем разные форматы данных
+        if "latestPosts" in items[0]:
+            log.info(f"✅ Формат профиля: найдено {len(items[0].get('latestPosts', []))} постов")
+        elif "displayUrl" in items[0] or "images" in items[0]:
+            log.info(f"✅ Формат постов: элементы являются постами напрямую")
+        else:
+            log.warning(f"⚠️ Неизвестный формат данных!")
 
-        # Собираем URL из актуального (highlights)
-        for highlight in root.get("highlights", []):
-            # Некоторые скриптеры отдают highlight.items
-            for item in highlight.get("items", []):
-                if item.get("displayUrl"):
-                    urls.append(item["displayUrl"])
-                if item.get("images"):
-                    urls.extend(item["images"])
-                if item.get("videoUrl"):
-                    urls.append(item["videoUrl"])
-            # На случай плоской структуры без items
-            if highlight.get("displayUrl"):
-                urls.append(highlight["displayUrl"])
-            if highlight.get("images"):
-                urls.extend(highlight["images"])
-            if highlight.get("videoUrl"):
-                urls.append(highlight["videoUrl"])
+    for idx, item in enumerate(items):
+        # Вариант 1: Данные - профиль с latestPosts
+        if "latestPosts" in item:
+            log.info(f"📦 Элемент {idx}: профиль, обрабатываем latestPosts")
+            posts = item.get("latestPosts", [])
+            for post_idx, post in enumerate(posts):
+                post_type = post.get("type", "Unknown")
+                
+                # ВАЖНО: Берем фото ТОЛЬКО из Image и Sidecar (карусели)
+                # Игнорируем Video, Reel, IGTV - даже если там есть превью
+                if post_type not in ["Image", "Sidecar"]:
+                    log.info(f"  ⏭️ Пост {post_idx}: {post_type} - НЕ фото, пропускаем")
+                    continue
+                
+                log.info(f"  📸 Пост {post_idx}: {post_type} - обрабатываем фото")
+                
+                # Берем главное изображение
+                if post.get("displayUrl"):
+                    urls.append(post["displayUrl"])
+                    log.debug(f"    ✅ Добавлено displayUrl")
+                
+                # Берем все изображения из массива (для каруселей)
+                if post.get("images"):
+                    image_count = len(post["images"])
+                    urls.extend(post["images"])
+                    log.debug(f"    ✅ Добавлено {image_count} изображений из массива")
+                
+                # Обрабатываем childPosts для каруселей
+                for child_idx, child in enumerate(post.get("childPosts", [])):
+                    if child.get("displayUrl"):
+                        urls.append(child["displayUrl"])
+                        log.debug(f"    ✅ Добавлено childPost {child_idx}")
+        
+        # Вариант 2: Данные - это уже посты напрямую (режим "posts")
+        elif "displayUrl" in item or "images" in item:
+            post_type = item.get("type", "Unknown")
+            
+            # ВАЖНО: Берем фото ТОЛЬКО из Image и Sidecar
+            if post_type not in ["Image", "Sidecar"]:
+                log.info(f"  ⏭️ Элемент {idx}: {post_type} - НЕ фото, пропускаем")
+                continue
+            
+            log.info(f"  📸 Элемент {idx}: {post_type} - обрабатываем фото")
+            
+            # Берем главное изображение
+            if item.get("displayUrl"):
+                urls.append(item["displayUrl"])
+                log.debug(f"    ✅ Добавлено displayUrl")
+            
+            # Берем все изображения из массива
+            if item.get("images"):
+                image_count = len(item["images"])
+                urls.extend(item["images"])
+                log.debug(f"    ✅ Добавлено {image_count} изображений")
+            
+            # Обрабатываем childPosts
+            for child_idx, child in enumerate(item.get("childPosts", [])):
+                if child.get("displayUrl"):
+                    urls.append(child["displayUrl"])
+                    log.debug(f"    ✅ Добавлено childPost {child_idx}")
 
-    # удаляем дубликаты, сохраняя порядок
+    # Удаляем дубликаты, сохраняя порядок
     seen = set()
     out = []
     for u in urls:
-        if u not in seen:
+        if u and u not in seen:
             out.append(u)
             seen.add(u)
+    
+    # Ограничиваем до 50 фото
+    max_photos = 50
+    if len(out) > max_photos:
+        log.info(f"⚠️ Найдено {len(out)} фото, ограничиваем до {max_photos}")
+        out = out[:max_photos]
+    
+    log.info(f"✅ Итого будет загружено: {len(out)} фото")
     return out
 
 
@@ -185,15 +212,11 @@ def download_photos(items: List[Dict], folder: Path):
     try:
         urls = _collect_urls(items)
         if not urls:
-            log.warning("no image urls found — nothing to download")
+            log.warning("❌ Фотографии не найдены — нечего загружать")
             return
 
-        # Ограничиваем до первых 15 фотографий для оптимизации
-        urls = urls[:15]
-        log.info("limiting to first %s images for optimal performance", len(urls))
-
         folder.mkdir(parents=True, exist_ok=True)
-        log.info("downloading %s images → %s", len(urls), folder)
+        log.info(f"📥 Начинаем загрузку {len(urls)} фотографий в {folder}")
 
         async def main():
             # Настройки клиента с более надежными параметрами
@@ -219,11 +242,11 @@ def download_photos(items: List[Dict], folder: Path):
         try:
             loop = asyncio.get_running_loop()
             future = asyncio.run_coroutine_threadsafe(main(), loop)
-            future.result(timeout=180)  # Увеличили таймаут для OCR
+            future.result(timeout=300)  # 5 минут на загрузку и OCR до 50 фото
         except RuntimeError:
             asyncio.run(main())
             
-        log.info("download and OCR completed (%s urls processed)", len(urls))
+        log.info(f"✅ Загрузка и OCR завершены ({len(urls)} фото обработано)")
         
     except Exception as e:
         log.error(f"Critical error in download_photos: {e}")
