@@ -7,3 +7,6 @@ anyio>=4.0.0
 apify-client>=1.6.0
 psutil>=5.9.6
 Pillow>=10.0.0
+easyocr>=1.7.0
+torch>=2.0.0
+torchvision>=0.15.0

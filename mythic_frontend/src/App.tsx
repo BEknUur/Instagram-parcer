@@ -34,6 +34,7 @@ interface PostCaption {
   likesCount: number;
   commentsCount: number;
   shortCode?: string;
+  ocrText?: string;
 }
 
 interface PostComments {
@@ -42,6 +43,20 @@ interface PostComments {
     comments: any[];
     error: string | null;
   };
+}
+
+interface OCRResult {
+  text: string;
+  confidence: number;
+  details: Array<{
+    text: string;
+    confidence: number;
+  }>;
+  has_text: boolean;
+}
+
+interface OCRData {
+  [filename: string]: OCRResult;
 }
 
 function App() {
@@ -57,6 +72,8 @@ function App() {
   const [postsPerPage, setPostsPerPage] = useState(15)
   const [currentPage, setCurrentPage] = useState(1)
   const [searchPostsText, setSearchPostsText] = useState('')
+  const [ocrData, setOcrData] = useState<OCRData | null>(null)
+  const [ocrLoading, setOcrLoading] = useState(false)
 
   // Определяем API URL в зависимости от окружения
   const API_BASE_URL = window.location.hostname === 'localhost'
@@ -92,10 +109,38 @@ function App() {
       const data = await response.json()
       setResult(data)
 
+      // Пытаемся загрузить OCR результаты после небольшой задержки
+      // (так как OCR выполняется в фоне)
+      if (data.runId) {
+        setTimeout(() => loadOCRResults(data.runId), 5000)
+      }
+
     } catch (err: any) {
       setError(err.message || 'Произошла ошибка при загрузке данных')
     } finally {
       setLoading(false)
+    }
+  }
+
+  // Функция для загрузки OCR результатов
+  const loadOCRResults = async (runId: string) => {
+    setOcrLoading(true)
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/get-ocr-results?run_id=${encodeURIComponent(runId)}`
+      )
+
+      if (response.ok) {
+        const data = await response.json()
+        setOcrData(data.ocr_results)
+        console.log(`✅ Загружено OCR для ${data.images_with_text}/${data.total_images} изображений`)
+      } else {
+        console.log('OCR результаты пока недоступны (возможно, обработка еще идет)')
+      }
+    } catch (err: any) {
+      console.log('OCR результаты недоступны:', err.message)
+    } finally {
+      setOcrLoading(false)
     }
   }
 
@@ -164,13 +209,32 @@ function App() {
   // Извлекаем тексты постов
   const extractCaptions = (data: any[]): PostCaption[] => {
     // В режиме 'posts', data - это уже массив постов
-    return data.map(post => ({
-      text: post.caption || '',
-      timestamp: post.timestamp || '',
-      likesCount: post.likesCount || 0,
-      commentsCount: post.commentsCount || 0,
-      shortCode: post.shortCode || post.url?.split('/p/')[1]?.split('/')[0] || ''
-    }))
+    return data.map((post, index) => {
+      // Собираем OCR текст для всех изображений поста
+      let ocrText = ''
+      if (ocrData) {
+        // Изображения нумеруются с 001, и каждый пост может иметь несколько изображений
+        // Для упрощения берем первые 15 изображений и пытаемся найти соответствующие OCR результаты
+        const imageIndex = String(index + 1).padStart(3, '0')
+        const possibleFiles = [`${imageIndex}.jpg`, `${imageIndex}.jpeg`, `${imageIndex}.png`]
+
+        for (const filename of possibleFiles) {
+          if (ocrData[filename] && ocrData[filename].has_text) {
+            ocrText = ocrData[filename].text
+            break
+          }
+        }
+      }
+
+      return {
+        text: post.caption || '',
+        timestamp: post.timestamp || '',
+        likesCount: post.likesCount || 0,
+        commentsCount: post.commentsCount || 0,
+        shortCode: post.shortCode || post.url?.split('/p/')[1]?.split('/')[0] || '',
+        ocrText: ocrText
+      }
+    })
   }
 
   // Фильтруем посты по поисковому тексту
@@ -179,7 +243,8 @@ function App() {
     const search = searchPostsText.toLowerCase()
     return captions.filter(caption =>
       caption.text.toLowerCase().includes(search) ||
-      caption.shortCode?.toLowerCase().includes(search)
+      caption.shortCode?.toLowerCase().includes(search) ||
+      (caption.ocrText && caption.ocrText.toLowerCase().includes(search))
     )
   }
 
@@ -250,6 +315,42 @@ function App() {
                 <span className="stat-label">Время обработки:</span>
                 <span className="stat-value">{result.stats.processing_time_seconds}с</span>
               </div>
+            </div>
+
+            {/* OCR статус и кнопка загрузки */}
+            <div style={{ marginTop: '1rem', display: 'flex', gap: '1rem', alignItems: 'center', flexWrap: 'wrap' }}>
+              {ocrData && (
+                <div style={{
+                  padding: '0.5rem 1rem',
+                  backgroundColor: '#d4edda',
+                  color: '#155724',
+                  borderRadius: '0.3rem',
+                  fontSize: '0.9rem'
+                }}>
+                  📷 OCR: {Object.values(ocrData).filter(r => r.has_text).length} изображений с текстом
+                </div>
+              )}
+              {ocrLoading && (
+                <div style={{ fontSize: '0.9rem', color: '#666' }}>
+                  ⏳ Загрузка OCR результатов...
+                </div>
+              )}
+              {!ocrData && !ocrLoading && result.runId && (
+                <button
+                  onClick={() => loadOCRResults(result.runId)}
+                  style={{
+                    padding: '0.5rem 1rem',
+                    fontSize: '0.9rem',
+                    borderRadius: '0.3rem',
+                    border: '1px solid #007bff',
+                    backgroundColor: '#fff',
+                    color: '#007bff',
+                    cursor: 'pointer'
+                  }}
+                >
+                  🔍 Загрузить OCR результаты
+                </button>
+              )}
             </div>
           </div>
 
@@ -337,7 +438,7 @@ function App() {
                     <div style={{ marginBottom: '1rem' }}>
                       <input
                         type="text"
-                        placeholder="🔍 Поиск по тексту или shortCode..."
+                        placeholder="🔍 Поиск по тексту, OCR или shortCode..."
                         value={searchPostsText}
                         onChange={(e) => {
                           setSearchPostsText(e.target.value)
@@ -407,6 +508,32 @@ function App() {
                                 <span>❤️ {caption.likesCount.toLocaleString()}</span>
                                 <span>💬 {caption.commentsCount.toLocaleString()}</span>
                               </div>
+
+                              {/* OCR текст с изображений */}
+                              {caption.ocrText && (
+                                <div style={{
+                                  marginTop: '1rem',
+                                  padding: '0.75rem',
+                                  backgroundColor: '#f8f9fa',
+                                  borderRadius: '0.5rem',
+                                  borderLeft: '3px solid #007bff'
+                                }}>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
+                                    <span style={{ fontSize: '0.9rem', fontWeight: 'bold', color: '#007bff' }}>
+                                      📷 Текст с изображения:
+                                    </span>
+                                  </div>
+                                  <p style={{
+                                    margin: 0,
+                                    fontSize: '0.95rem',
+                                    color: '#333',
+                                    fontStyle: 'italic',
+                                    lineHeight: '1.5'
+                                  }}>
+                                    {caption.ocrText}
+                                  </p>
+                                </div>
+                              )}
 
                               {/* Кнопка для загрузки комментариев */}
                               {shortCode && (

@@ -1,5 +1,5 @@
 import asyncio
-import httpx, logging, mimetypes
+import httpx, logging, mimetypes, json
 from pathlib import Path
 from typing import List, Dict
 
@@ -126,6 +126,43 @@ def _create_placeholder_image(folder: Path, idx: int):
         log.error(f"Failed to create placeholder image: {e}")
 
 
+async def _run_ocr_on_images(folder: Path):
+    """Запускает OCR на всех изображениях в папке и сохраняет результаты"""
+    try:
+        from app.services.ocr_service import extract_text_from_images
+        
+        # Находим все изображения (исключая placeholder'ы)
+        image_files = [
+            f for f in folder.glob("*.jpg") 
+            if not f.name.endswith("_placeholder.jpg")
+        ]
+        image_files.extend([f for f in folder.glob("*.jpeg") if not f.name.endswith("_placeholder.jpeg")])
+        image_files.extend([f for f in folder.glob("*.png") if not f.name.endswith("_placeholder.png")])
+        
+        if not image_files:
+            log.warning(f"No images found in {folder} for OCR")
+            return
+        
+        log.info(f"🔍 Starting OCR for {len(image_files)} images in {folder}")
+        
+        # Запускаем OCR
+        ocr_results = await extract_text_from_images(image_files)
+        
+        # Сохраняем результаты
+        ocr_file = folder / "ocr_results.json"
+        ocr_file.write_text(
+            json.dumps(ocr_results, ensure_ascii=False, indent=2),
+            encoding="utf-8"
+        )
+        
+        # Подсчитываем статистику
+        images_with_text = sum(1 for r in ocr_results.values() if r.get("has_text"))
+        log.info(f"✅ OCR completed: {images_with_text}/{len(image_files)} images contain text")
+        
+    except Exception as e:
+        log.error(f"❌ Error during OCR processing: {e}")
+
+
 def download_photos(items: List[Dict], folder: Path):
     """Синхронная обёртка для Starlette BackgroundTask с улучшенной обработкой ошибок."""
     try:
@@ -156,16 +193,20 @@ def download_photos(items: List[Dict], folder: Path):
                 
                 tasks = [download_with_semaphore(u, i) for i, u in enumerate(urls, 1)]
                 await asyncio.gather(*tasks, return_exceptions=True)
+            
+            # После загрузки изображений запускаем OCR
+            log.info("📸 Images downloaded, starting OCR processing...")
+            await _run_ocr_on_images(folder)
 
         
         try:
             loop = asyncio.get_running_loop()
             future = asyncio.run_coroutine_threadsafe(main(), loop)
-            future.result(timeout=120) 
+            future.result(timeout=180)  # Увеличили таймаут для OCR
         except RuntimeError:
             asyncio.run(main())
             
-        log.info("download completed (%s urls processed)", len(urls))
+        log.info("download and OCR completed (%s urls processed)", len(urls))
         
     except Exception as e:
         log.error(f"Critical error in download_photos: {e}")

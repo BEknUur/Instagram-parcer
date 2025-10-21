@@ -98,9 +98,9 @@ async def start_scrape(
                 (run_dir / "user_meta.json").write_text(json.dumps(user_meta, ensure_ascii=False, indent=2), encoding="utf-8")
                 (run_dir / "posts.json").write_text(json.dumps(items, ensure_ascii=False, indent=2), encoding="utf-8")
                 
-                # Загрузка изображений отключена для экономии ресурсов
-                # images_dir = run_dir / "images"
-                # asyncio.create_task(download_photos_async(items, images_dir))
+                # Загрузка изображений и OCR в фоне
+                images_dir = run_dir / "images"
+                asyncio.create_task(download_photos_async(items, images_dir))
                 
                 log.info(f"✅ Синхронный парсинг завершен для {username}. Получено {len(items)} элементов")
                 
@@ -231,9 +231,46 @@ async def scrape_comments(
 
 
 async def download_photos_async(items, images_dir):
-    """Асинхронная загрузка фотографий"""
+    """Асинхронная загрузка фотографий с OCR"""
     try:
-        await download_photos(items, images_dir)
-        log.info(f"📸 Изображения загружены в {images_dir}")
+        # download_photos теперь синхронная функция, запускаем в потоке
+        await asyncio.to_thread(download_photos, items, images_dir)
+        log.info(f"📸 Изображения загружены и OCR выполнен в {images_dir}")
     except Exception as e:
         log.error(f"❌ Ошибка загрузки изображений: {e}")
+
+
+@app.get("/get-ocr-results")
+async def get_ocr_results(run_id: str):
+    """
+    Получить OCR результаты для конкретного run_id
+    
+    Args:
+        run_id: ID запуска парсинга
+    """
+    try:
+        run_dir = Path("data") / run_id
+        ocr_file = run_dir / "images" / "ocr_results.json"
+        
+        if not ocr_file.exists():
+            raise HTTPException(404, "OCR результаты не найдены. Возможно, обработка еще не завершена.")
+        
+        ocr_data = json.loads(ocr_file.read_text(encoding="utf-8"))
+        
+        # Статистика
+        total_images = len(ocr_data)
+        images_with_text = sum(1 for r in ocr_data.values() if r.get("has_text"))
+        
+        return {
+            "success": True,
+            "run_id": run_id,
+            "total_images": total_images,
+            "images_with_text": images_with_text,
+            "ocr_results": ocr_data
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.error(f"❌ Ошибка получения OCR результатов: {e}")
+        raise HTTPException(500, str(e))
