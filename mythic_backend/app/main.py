@@ -62,6 +62,7 @@ async def start_scrape(
         "scrapeHighlights": True,      # ✅ Собираем актуальное (highlights)
         "highlightsLimit": 20,         # Лимит элементов в актуальном
         "enhanceUserSearchWithFacebookPage": False,  # Отключаем Facebook
+        "searchType": "user",
     }
 
     # Запускаем актор БЕЗ webhook - будем ждать завершения
