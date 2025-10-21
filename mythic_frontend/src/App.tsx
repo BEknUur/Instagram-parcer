@@ -76,7 +76,8 @@ function App() {
   const [ocrLoading, setOcrLoading] = useState(false)
   const [ocrAttempt, setOcrAttempt] = useState(0)
   const [images, setImages] = useState<string[]>([])
-  const [showGallery, setShowGallery] = useState(false)
+  const [showGallery, setShowGallery] = useState(true)
+  const [imagesLoading, setImagesLoading] = useState(false)
 
   // Определяем API URL в зависимости от окружения
   const API_BASE_URL = window.location.hostname === 'localhost'
@@ -112,9 +113,10 @@ function App() {
       const data = await response.json()
       setResult(data)
 
-      // Пытаемся загрузить OCR результаты с повторными попытками
-      // (так как OCR выполняется в фоне и может занять время)
+      // Загружаем изображения и OCR результаты с повторными попытками
+      // (так как загрузка и OCR выполняются в фоне и могут занять время)
       if (data.runId) {
+        loadImagesWithRetry(data.runId)
         loadOCRResultsWithRetry(data.runId)
       }
 
@@ -127,6 +129,7 @@ function App() {
 
   // Функция для загрузки списка изображений
   const loadImages = async (runId: string) => {
+    setImagesLoading(true)
     try {
       const response = await fetch(
         `${API_BASE_URL}/get-images?run_id=${encodeURIComponent(runId)}`
@@ -141,6 +144,50 @@ function App() {
       }
     } catch (err: any) {
       console.log('Ошибка загрузки изображений:', err.message)
+    } finally {
+      setImagesLoading(false)
+    }
+  }
+
+  // Функция для загрузки изображений с повторными попытками
+  const loadImagesWithRetry = async (runId: string, attempt: number = 1, maxAttempts: number = 8) => {
+    setImagesLoading(true)
+
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/get-images?run_id=${encodeURIComponent(runId)}`
+      )
+
+      if (response.ok) {
+        const data = await response.json()
+        if (data.total_images > 0) {
+          setImages(data.images || [])
+          console.log(`✅ Загружено ${data.total_images} изображений`)
+          setImagesLoading(false)
+        } else if (attempt < maxAttempts) {
+          // Изображения еще не готовы, пробуем снова
+          const delay = attempt * 5000 // 5, 10, 15, 20, 25, 30, 35, 40 секунд
+          console.log(`📸 Изображения загружаются (попытка ${attempt}/${maxAttempts}), следующая попытка через ${delay / 1000}с...`)
+          setTimeout(() => loadImagesWithRetry(runId, attempt + 1, maxAttempts), delay)
+        } else {
+          console.log('Изображения не были загружены после всех попыток')
+          setImagesLoading(false)
+        }
+      } else if (attempt < maxAttempts) {
+        const delay = attempt * 5000
+        setTimeout(() => loadImagesWithRetry(runId, attempt + 1, maxAttempts), delay)
+      } else {
+        console.log('Изображения недоступны после всех попыток')
+        setImagesLoading(false)
+      }
+    } catch (err: any) {
+      if (attempt < maxAttempts) {
+        const delay = attempt * 5000
+        setTimeout(() => loadImagesWithRetry(runId, attempt + 1, maxAttempts), delay)
+      } else {
+        console.log('Ошибка загрузки изображений:', err.message)
+        setImagesLoading(false)
+      }
     }
   }
 
@@ -380,8 +427,31 @@ function App() {
               </div>
             </div>
 
-            {/* OCR статус и кнопка загрузки */}
+            {/* Статус загрузки изображений и OCR */}
             <div style={{ marginTop: '1rem', display: 'flex', gap: '1rem', alignItems: 'center', flexWrap: 'wrap' }}>
+              {images.length > 0 && (
+                <div style={{
+                  padding: '0.5rem 1rem',
+                  backgroundColor: '#d1ecf1',
+                  color: '#0c5460',
+                  borderRadius: '0.3rem',
+                  fontSize: '0.9rem',
+                  fontWeight: 'bold'
+                }}>
+                  📸 {images.length} фото загружено
+                </div>
+              )}
+              {imagesLoading && (
+                <div style={{
+                  fontSize: '0.9rem',
+                  color: '#666',
+                  padding: '0.5rem 1rem',
+                  backgroundColor: '#fff3cd',
+                  borderRadius: '0.3rem'
+                }}>
+                  ⏳ Загрузка изображений...
+                </div>
+              )}
               {ocrData && (
                 <div style={{
                   padding: '0.5rem 1rem',
@@ -390,13 +460,35 @@ function App() {
                   borderRadius: '0.3rem',
                   fontSize: '0.9rem'
                 }}>
-                  📷 OCR: {Object.values(ocrData).filter(r => r.has_text).length} изображений с текстом
+                  📝 OCR: {Object.values(ocrData).filter(r => r.has_text).length} изображений с текстом
                 </div>
               )}
               {ocrLoading && (
-                <div style={{ fontSize: '0.9rem', color: '#666' }}>
-                  ⏳ {ocrAttempt > 0 ? `Ожидание OCR (попытка ${ocrAttempt}/6)...` : 'Загрузка OCR результатов...'}
+                <div style={{
+                  fontSize: '0.9rem',
+                  color: '#666',
+                  padding: '0.5rem 1rem',
+                  backgroundColor: '#fff3cd',
+                  borderRadius: '0.3rem'
+                }}>
+                  ⏳ {ocrAttempt > 0 ? `Ожидание OCR (попытка ${ocrAttempt}/6)...` : 'Обработка OCR...'}
                 </div>
+              )}
+              {!imagesLoading && images.length === 0 && result.runId && (
+                <button
+                  onClick={() => loadImages(result.runId)}
+                  style={{
+                    padding: '0.5rem 1rem',
+                    fontSize: '0.9rem',
+                    borderRadius: '0.3rem',
+                    border: '1px solid #17a2b8',
+                    backgroundColor: '#fff',
+                    color: '#17a2b8',
+                    cursor: 'pointer'
+                  }}
+                >
+                  📸 Загрузить изображения
+                </button>
               )}
               {!ocrData && !ocrLoading && result.runId && (
                 <button
@@ -411,7 +503,7 @@ function App() {
                     cursor: 'pointer'
                   }}
                 >
-                  🔍 Загрузить OCR результаты
+                  🔍 Загрузить OCR
                 </button>
               )}
             </div>
@@ -424,6 +516,7 @@ function App() {
                 <h3>📸 Галерея фотографий ({images.length})</h3>
                 <button
                   onClick={() => setShowGallery(!showGallery)}
+                  className="button"
                   style={{ padding: '0.5rem 1rem', fontSize: '0.9rem' }}
                 >
                   {showGallery ? '🔼 Скрыть' : '🔽 Показать'}
@@ -432,8 +525,8 @@ function App() {
               {showGallery && (
                 <div style={{
                   display: 'grid',
-                  gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
-                  gap: '1rem',
+                  gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))',
+                  gap: '1.5rem',
                   marginTop: '1rem'
                 }}>
                   {images.map((imageName, index) => {
@@ -442,52 +535,106 @@ function App() {
 
                     return (
                       <div key={index} style={{
-                        border: '1px solid #ddd',
-                        borderRadius: '0.5rem',
+                        border: '1px solid #e0e0e0',
+                        borderRadius: '0.75rem',
                         overflow: 'hidden',
                         backgroundColor: '#fff',
-                        boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
-                      }}>
-                        <img
-                          src={imageUrl}
-                          alt={`Photo ${index + 1}`}
-                          style={{
-                            width: '100%',
-                            height: '200px',
-                            objectFit: 'cover',
-                            cursor: 'pointer'
-                          }}
-                          onClick={() => window.open(imageUrl, '_blank')}
-                        />
-                        <div style={{ padding: '0.75rem' }}>
-                          <div style={{ fontSize: '0.85rem', color: '#666', marginBottom: '0.5rem' }}>
+                        boxShadow: '0 4px 6px rgba(0,0,0,0.1)',
+                        transition: 'transform 0.2s, box-shadow 0.2s',
+                        cursor: 'pointer'
+                      }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.transform = 'translateY(-4px)';
+                          e.currentTarget.style.boxShadow = '0 8px 12px rgba(0,0,0,0.15)';
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.transform = 'translateY(0)';
+                          e.currentTarget.style.boxShadow = '0 4px 6px rgba(0,0,0,0.1)';
+                        }}>
+                        <div style={{ position: 'relative' }}>
+                          <img
+                            src={imageUrl}
+                            alt={`Photo ${index + 1}`}
+                            style={{
+                              width: '100%',
+                              height: '250px',
+                              objectFit: 'cover',
+                              cursor: 'pointer'
+                            }}
+                            onClick={() => window.open(imageUrl, '_blank')}
+                          />
+                          <div style={{
+                            position: 'absolute',
+                            top: '0.5rem',
+                            right: '0.5rem',
+                            backgroundColor: 'rgba(0,0,0,0.6)',
+                            color: 'white',
+                            padding: '0.25rem 0.5rem',
+                            borderRadius: '0.3rem',
+                            fontSize: '0.75rem',
+                            fontWeight: 'bold'
+                          }}>
+                            #{index + 1}
+                          </div>
+                        </div>
+                        <div style={{ padding: '1rem' }}>
+                          <div style={{
+                            fontSize: '0.8rem',
+                            color: '#999',
+                            marginBottom: '0.75rem',
+                            fontFamily: 'monospace'
+                          }}>
                             {imageName}
                           </div>
                           {ocrResult && ocrResult.has_text && (
                             <div style={{
                               fontSize: '0.85rem',
-                              padding: '0.5rem',
-                              backgroundColor: '#f8f9fa',
-                              borderRadius: '0.3rem',
-                              borderLeft: '3px solid #28a745'
+                              padding: '0.75rem',
+                              backgroundColor: '#f0f9ff',
+                              borderRadius: '0.5rem',
+                              borderLeft: '4px solid #3b82f6'
                             }}>
-                              <div style={{ fontWeight: 'bold', marginBottom: '0.25rem', color: '#28a745' }}>
-                                ✅ Текст ({Math.round(ocrResult.confidence * 100)}%):
+                              <div style={{
+                                fontWeight: 'bold',
+                                marginBottom: '0.5rem',
+                                color: '#3b82f6',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '0.5rem'
+                              }}>
+                                <span>📝 Распознанный текст</span>
+                                <span style={{
+                                  fontSize: '0.7rem',
+                                  backgroundColor: '#3b82f6',
+                                  color: 'white',
+                                  padding: '0.15rem 0.4rem',
+                                  borderRadius: '0.25rem'
+                                }}>
+                                  {Math.round(ocrResult.confidence * 100)}%
+                                </span>
                               </div>
                               <div style={{
-                                fontSize: '0.8rem',
-                                color: '#333',
-                                maxHeight: '60px',
-                                overflow: 'hidden',
-                                textOverflow: 'ellipsis'
+                                fontSize: '0.85rem',
+                                color: '#1e3a8a',
+                                lineHeight: '1.5',
+                                maxHeight: '80px',
+                                overflow: 'auto'
                               }}>
                                 {ocrResult.text}
                               </div>
                             </div>
                           )}
                           {ocrResult && !ocrResult.has_text && (
-                            <div style={{ fontSize: '0.8rem', color: '#999', fontStyle: 'italic' }}>
-                              Текст не обнаружен
+                            <div style={{
+                              fontSize: '0.85rem',
+                              color: '#999',
+                              fontStyle: 'italic',
+                              padding: '0.5rem',
+                              backgroundColor: '#f8f8f8',
+                              borderRadius: '0.5rem',
+                              textAlign: 'center'
+                            }}>
+                              📄 Текст не обнаружен
                             </div>
                           )}
                         </div>
