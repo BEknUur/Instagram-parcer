@@ -51,12 +51,12 @@ async def start_scrape(
     run_input = {
         "directUrls":     [clean_url],
         "resultsType":    "details",
-        "resultsLimit": 100,           # ✅ Максимум 100 элементов
+        "resultsLimit": 300,           # ✅ Максимум 300 элементов (увеличено для получения большего количества постов)
         "searchLimit": 1,              # Только один профиль  
         "addParentData": True,         # Добавляем данные профиля
         "scrapeComments": True,        # ✅ ВКЛЮЧАЕМ сбор комментариев
         "commentsLimit": 100,          # ✅ До 100 комментариев на пост
-        "postsLimit": 50,              # ✅ До 50 постов (новый параметр)
+        "postsLimit": 100,             # ✅ До 100 постов (увеличено с 50)
         "scrapeStories": True,         # Собираем сторисы
         "storiesLimit": 10,            # До 10 сторисов
         "scrapeHighlights": True,      # ✅ Собираем актуальное (highlights)
@@ -90,7 +90,7 @@ async def start_scrape(
                     raise HTTPException(500, "Не удалось получить dataset_id")
                 
                 # Получаем данные
-                items = await fetch_items(dataset_id)
+                items = await fetch_items(dataset_id, limit=run_input["resultsLimit"])
                 
                 # Сохраняем данные локально (опционально)
                 run_dir = Path("data") / run_id
@@ -200,7 +200,7 @@ async def scrape_comments(
                 if not dataset_id:
                     raise HTTPException(500, "dataset_id не получен")
                 
-                comments = await fetch_items(dataset_id)
+                comments = await fetch_items(dataset_id, limit=results_limit)
                 
                 # Сохраняем
                 save_dir = Path("data/comments") / run_id

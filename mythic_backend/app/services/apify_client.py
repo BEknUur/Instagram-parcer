@@ -39,12 +39,12 @@ async def fetch_run(run_id: str) -> dict:
     return await anyio.to_thread.run_sync(lambda: _client.run(run_id).get())
 
 
-async def fetch_items(dataset_id: str, retries: int = 10, delay: float = 2.0) -> list[dict]:
+async def fetch_items(dataset_id: str, limit: int = 1000, retries: int = 10, delay: float = 2.0) -> list[dict]:
     """Скачиваем все items; повторяем, пока датасет не станет доступен."""
     for attempt in range(1, retries + 1):
         try:
             return await anyio.to_thread.run_sync(
-                lambda: _client.dataset(dataset_id).list_items().items
+                lambda: _client.dataset(dataset_id).list_items(limit=limit).items
             )
         except ApifyApiError as err:
             if getattr(err, "status_code", None) != 404:
