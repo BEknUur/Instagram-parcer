@@ -53,19 +53,19 @@ function App() {
   const [showCaptions, setShowCaptions] = useState(true)
   const [showProfile, setShowProfile] = useState(true)
   const [postComments, setPostComments] = useState<PostComments>({})
-  const [commentLimits, setCommentLimits] = useState<{[key: string]: number}>({})
+  const [commentLimits, setCommentLimits] = useState<{ [key: string]: number }>({})
   const [postsPerPage, setPostsPerPage] = useState(15)
   const [currentPage, setCurrentPage] = useState(1)
   const [searchPostsText, setSearchPostsText] = useState('')
 
   // Определяем API URL в зависимости от окружения
-  const API_BASE_URL = window.location.hostname === 'localhost' 
-    ? 'http://localhost:8001' 
+  const API_BASE_URL = window.location.hostname === 'localhost'
+    ? 'http://localhost:8001'
     : '/api';
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    
+
     if (!username.trim()) {
       setError('Пожалуйста, введите username')
       return
@@ -79,19 +79,19 @@ function App() {
       // Убираем @ если пользователь его ввел
       const cleanUsername = username.replace('@', '').trim()
       const instagramUrl = `https://www.instagram.com/${cleanUsername}/`
-      
+
       // Отправляем запрос к бэкенду
       const response = await fetch(
         `${API_BASE_URL}/start-scrape?url=${encodeURIComponent(instagramUrl)}&username=${encodeURIComponent(cleanUsername)}`
       )
-      
+
       if (!response.ok) {
         throw new Error(`Ошибка ${response.status}: ${response.statusText}`)
       }
-      
+
       const data = await response.json()
       setResult(data)
-      
+
     } catch (err: any) {
       setError(err.message || 'Произошла ошибка при загрузке данных')
     } finally {
@@ -103,24 +103,24 @@ function App() {
   const loadPostComments = async (shortCode: string) => {
     const postUrl = `https://www.instagram.com/p/${shortCode}/`
     const limit = commentLimits[shortCode] || 50
-    
+
     // Устанавливаем состояние загрузки
     setPostComments(prev => ({
       ...prev,
       [shortCode]: { loading: true, comments: [], error: null }
     }))
-    
+
     try {
       const response = await fetch(
         `${API_BASE_URL}/scrape-comments?post_urls=${encodeURIComponent(postUrl)}&results_limit=${limit}`
       )
-      
+
       if (!response.ok) {
         throw new Error(`Ошибка ${response.status}`)
       }
-      
+
       const data = await response.json()
-      
+
       setPostComments(prev => ({
         ...prev,
         [shortCode]: {
@@ -129,7 +129,7 @@ function App() {
           error: null
         }
       }))
-      
+
     } catch (err: any) {
       setPostComments(prev => ({
         ...prev,
@@ -145,46 +145,39 @@ function App() {
   // Извлекаем информацию о профиле
   const extractProfileInfo = (data: any[]): ProfileInfo | null => {
     if (!data || data.length === 0) return null
-    const profileData = data[0]
+    // В режиме 'posts', информация о профиле дублируется в каждом посте.
+    // Берем из первого поста.
+    const postData = data[0]
     return {
-      username: profileData.username || '',
-      fullName: profileData.fullName || '',
-      biography: profileData.biography || '',
-      followersCount: profileData.followersCount || 0,
-      followsCount: profileData.followsCount || 0,
-      postsCount: profileData.postsCount || 0,
-      verified: profileData.verified || false,
-      private: profileData.private || false,
-      profilePicUrl: profileData.profilePicUrl || ''
+      username: postData.ownerUsername || '',
+      fullName: postData.ownerFullName || '',
+      biography: '', // В данных поста нет биографии
+      followersCount: 0, // и количества подписчиков
+      followsCount: 0,
+      postsCount: 0,
+      verified: postData.ownerIsVerified || false,
+      private: false,
+      profilePicUrl: postData.ownerProfilePicUrl || ''
     }
   }
 
   // Извлекаем тексты постов
   const extractCaptions = (data: any[]): PostCaption[] => {
-    const captions: PostCaption[] = []
-    data.forEach(item => {
-      if (item.latestPosts && Array.isArray(item.latestPosts)) {
-        item.latestPosts.forEach((post: any) => {
-          if (post.caption) {
-            captions.push({
-              text: post.caption,
-              timestamp: post.timestamp || '',
-              likesCount: post.likesCount || 0,
-              commentsCount: post.commentsCount || 0,
-              shortCode: post.shortCode || post.url?.split('/p/')[1]?.split('/')[0] || ''
-            })
-          }
-        })
-      }
-    })
-    return captions
+    // В режиме 'posts', data - это уже массив постов
+    return data.map(post => ({
+      text: post.caption || '',
+      timestamp: post.timestamp || '',
+      likesCount: post.likesCount || 0,
+      commentsCount: post.commentsCount || 0,
+      shortCode: post.shortCode || post.url?.split('/p/')[1]?.split('/')[0] || ''
+    }))
   }
 
   // Фильтруем посты по поисковому тексту
   const filterCaptions = (captions: PostCaption[]): PostCaption[] => {
     if (!searchPostsText.trim()) return captions
     const search = searchPostsText.toLowerCase()
-    return captions.filter(caption => 
+    return captions.filter(caption =>
       caption.text.toLowerCase().includes(search) ||
       caption.shortCode?.toLowerCase().includes(search)
     )
@@ -206,11 +199,11 @@ function App() {
     <div className="container">
       <h1>Instagram Parser</h1>
       <p className="subtitle">Получите данные профиля и комментарии Instagram</p>
-      
+
       <form onSubmit={handleSubmit} className="form">
         <div className="input-group">
           <input
-                type="text"
+            type="text"
             value={username}
             onChange={(e) => setUsername(e.target.value)}
             placeholder="@username"
@@ -267,7 +260,7 @@ function App() {
               <div className="profile-section">
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
                   <h3>👤 Информация о профиле</h3>
-                  <button 
+                  <button
                     onClick={() => setShowProfile(!showProfile)}
                     style={{ padding: '0.5rem 1rem', fontSize: '0.9rem' }}
                   >
@@ -325,19 +318,19 @@ function App() {
             const allCaptions = extractCaptions(result.data)
             const { captions, totalPages } = getPaginatedCaptions(allCaptions)
             const filteredTotal = filterCaptions(allCaptions).length
-            
+
             return allCaptions.length > 0 && (
               <div className="captions-section">
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
                   <h3>📝 Тексты постов ({filteredTotal}/{allCaptions.length})</h3>
-                  <button 
+                  <button
                     onClick={() => setShowCaptions(!showCaptions)}
                     style={{ padding: '0.5rem 1rem', fontSize: '0.9rem' }}
                   >
                     {showCaptions ? '🔼 Скрыть' : '🔽 Показать'}
                   </button>
                 </div>
-                
+
                 {showCaptions && (
                   <>
                     {/* Поисковая строка */}
@@ -397,7 +390,7 @@ function App() {
                           const shortCode = caption.shortCode || ''
                           const commentsState = postComments[shortCode]
                           const globalIndex = (currentPage - 1) * postsPerPage + index + 1
-                          
+
                           return (
                             <div key={index} className="caption-card">
                               <div className="caption-header">
@@ -414,7 +407,7 @@ function App() {
                                 <span>❤️ {caption.likesCount.toLocaleString()}</span>
                                 <span>💬 {caption.commentsCount.toLocaleString()}</span>
                               </div>
-                              
+
                               {/* Кнопка для загрузки комментариев */}
                               {shortCode && (
                                 <div className="comments-controls">
@@ -439,12 +432,12 @@ function App() {
                                   </button>
                                 </div>
                               )}
-                              
+
                               {/* Отображение комментариев */}
                               {commentsState?.error && (
                                 <div className="comments-error">❌ {commentsState.error}</div>
                               )}
-                              
+
                               {commentsState?.comments && commentsState.comments.length > 0 && (
                                 <div className="post-comments-section">
                                   <h4>💬 Комментарии ({commentsState.comments.length})</h4>
@@ -478,10 +471,10 @@ function App() {
 
                     {/* Пагинация */}
                     {totalPages > 1 && (
-                      <div style={{ 
-                        display: 'flex', 
-                        justifyContent: 'center', 
-                        gap: '0.5rem', 
+                      <div style={{
+                        display: 'flex',
+                        justifyContent: 'center',
+                        gap: '0.5rem',
                         marginTop: '2rem',
                         flexWrap: 'wrap'
                       }}>
@@ -499,7 +492,7 @@ function App() {
                         >
                           ← Предыдущая
                         </button>
-                        
+
                         {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => (
                           <button
                             key={page}
@@ -517,7 +510,7 @@ function App() {
                             {page}
                           </button>
                         ))}
-                        
+
                         <button
                           onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
                           disabled={currentPage === totalPages}
@@ -543,7 +536,7 @@ function App() {
           <div className="json-section">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
               <h3>📋 JSON данные (сырые)</h3>
-              <button 
+              <button
                 onClick={() => setShowJson(!showJson)}
                 style={{ padding: '0.5rem 1rem', fontSize: '0.9rem' }}
               >
