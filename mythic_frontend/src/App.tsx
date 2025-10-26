@@ -85,21 +85,73 @@ function App() {
     setError(null)
     setResult(null)
 
-    try {
-      // Убираем @ если пользователь его ввел
-      const cleanUsername = username.replace('@', '').trim()
-      const instagramUrl = `https://www.instagram.com/${cleanUsername}/`
+    // Функция для выполнения запроса с повторными попытками
+    const makeRequestWithRetry = async (attempt: number = 1, maxAttempts: number = 3): Promise<any> => {
+      try {
+        // Убираем @ если пользователь его ввел
+        const cleanUsername = username.replace('@', '').trim()
+        const instagramUrl = `https://www.instagram.com/${cleanUsername}/`
 
-      // Отправляем запрос к бэкенду
-      const response = await fetch(
-        `${API_BASE_URL}/start-scrape?url=${encodeURIComponent(instagramUrl)}&username=${encodeURIComponent(cleanUsername)}`
-      )
+        console.log(`📡 Попытка ${attempt}/${maxAttempts}: отправляем запрос к ${API_BASE_URL}/start-scrape`)
 
-      if (!response.ok) {
-        throw new Error(`Ошибка ${response.status}: ${response.statusText}`)
+        // Создаем AbortController для управления таймаутом
+        const controller = new AbortController()
+        const timeoutId = setTimeout(() => controller.abort(), 120000) // 2 минуты таймаут
+
+        try {
+          // Отправляем запрос к бэкенду с увеличенным таймаутом
+          const response = await fetch(
+            `${API_BASE_URL}/start-scrape?url=${encodeURIComponent(instagramUrl)}&username=${encodeURIComponent(cleanUsername)}`,
+            {
+              signal: controller.signal,
+              headers: {
+                'Accept': 'application/json',
+                'Content-Type': 'application/json',
+              }
+            }
+          )
+
+          clearTimeout(timeoutId)
+
+          if (!response.ok) {
+            // Специальная обработка для 499 ошибки
+            if (response.status === 499) {
+              throw new Error('Соединение было закрыто браузером. Это может произойти при долгом выполнении запроса. Попробуйте еще раз.')
+            }
+            throw new Error(`Ошибка ${response.status}: ${response.statusText}`)
+          }
+
+          const data = await response.json()
+          console.log(`✅ Запрос успешен с попытки ${attempt}:`, data)
+          return data
+
+        } catch (fetchErr: any) {
+          clearTimeout(timeoutId)
+
+          if (fetchErr.name === 'AbortError') {
+            throw new Error(`Превышено время ожидания запроса (2 минуты). Попытка ${attempt}/${maxAttempts}.`)
+          }
+
+          throw fetchErr
+        }
+
+      } catch (err: any) {
+        console.log(`❌ Попытка ${attempt} не удалась:`, err.message)
+
+        if (attempt < maxAttempts) {
+          const delay = Math.min(1000 * Math.pow(2, attempt - 1), 10000) // Экспоненциальная задержка, максимум 10 секунд
+          console.log(`⏳ Ждем ${delay / 1000}с перед следующей попыткой...`)
+
+          await new Promise(resolve => setTimeout(resolve, delay))
+          return makeRequestWithRetry(attempt + 1, maxAttempts)
+        }
+
+        throw err
       }
+    }
 
-      const data = await response.json()
+    try {
+      const data = await makeRequestWithRetry()
       setResult(data)
 
       // Запускаем мониторинг статуса и загрузку изображений
@@ -110,7 +162,8 @@ function App() {
       }
 
     } catch (err: any) {
-      setError(err.message || 'Произошла ошибка при загрузке данных')
+      console.error('❌ Все попытки исчерпаны:', err)
+      setError(err.message || 'Произошла ошибка при загрузке данных. Попробуйте еще раз.')
     } finally {
       setLoading(false)
     }

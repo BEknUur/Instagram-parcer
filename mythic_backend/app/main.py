@@ -45,32 +45,35 @@ async def start_scrape(
     username: str,
     background_tasks: BackgroundTasks
 ):
-    """Асинхронный парсинг Instagram профиля - возвращает данные сразу, изображения загружаются в фоне"""
+    """Асинхронный парсинг Instagram профиля с быстрой обработкой ошибок соединения"""
     clean_url = str(url).rstrip("/")
-
     user_identifier = f"user_{username.lower()}"
 
-    run_input = {
-        "directUrls":     [clean_url],
-        "resultsType":    "posts",
-        "resultsLimit": 50,
-        "searchLimit": 1,              # Только один профиль
-        "searchType": "user",
-    }
+    # Проверка валидности URL
+    if not clean_url.startswith('https://www.instagram.com/'):
+        raise HTTPException(400, "URL должен быть с instagram.com")
 
-    # Запускаем актор БЕЗ webhook - будем ждать завершения
-    run = await run_actor(run_input)
-    run_id = run["id"]
+    try:
+        run_input = {
+            "directUrls":     [clean_url],
+            "resultsType":    "posts",
+            "resultsLimit": 50,
+            "searchLimit": 1,              # Только один профиль
+            "searchType": "user",
+        }
 
-    log.info(f"🚀 Асинхронный парсинг начат для {username}, runId={run_id}")
+        # Запускаем актор БЕЗ webhook - будем ждать завершения
+        run = await run_actor(run_input)
+        run_id = run["id"]
 
-    # Ждем завершения актора (максимум 5 минут)
-    max_wait_time = 300  # 5 минут (уменьшили с 10)
-    check_interval = 5   # Проверяем каждые 5 секунд (уменьшили с 10)
-    elapsed_time = 0
+        log.info(f"🚀 Асинхронный парсинг начат для {username}, runId={run_id}")
 
-    while elapsed_time < max_wait_time:
-        try:
+        # Ждем завершения актора (максимум 3 минуты для быстрого отклика)
+        max_wait_time = 180  # 3 минуты (уменьшили для быстрого отклика)
+        check_interval = 3   # Проверяем каждые 3 секунды
+        elapsed_time = 0
+
+        while elapsed_time < max_wait_time:
             # Проверяем статус актора
             run_status = await fetch_run(run_id)
             status = run_status.get("status")
@@ -131,21 +134,103 @@ async def start_scrape(
                 raise HTTPException(500, f"Парсинг не удался: {run_status.get('statusMessage', 'Неизвестная ошибка')}")
 
             elif status in ["RUNNING", "READY"]:
-                # Актор еще работает - ждем
-                await asyncio.sleep(check_interval)
-                elapsed_time += check_interval
+                # Для первых 30 секунд ждем нормального завершения
+                if elapsed_time < 30:
+                    await asyncio.sleep(check_interval)
+                    elapsed_time += check_interval
+                else:
+                    # После 30 секунд, если актор еще работает, возвращаем ответ с текущими данными
+                    try:
+                        dataset_id = run_status.get("defaultDatasetId")
+                        if dataset_id:
+                            items = await fetch_items(dataset_id, limit=run_input["resultsLimit"])
+                            if len(items) > 0:  # Если есть данные, возвращаем их
+                                log.info(f"📊 Ранний возврат с {len(items)} элементами для {username}")
+
+                                # Сохраняем данные локально
+                                run_dir = Path("data") / run_id
+                                run_dir.mkdir(parents=True, exist_ok=True)
+
+                                user_meta = {
+                                    "user_id": user_identifier,
+                                    "username": username,
+                                    "instagram_url": clean_url,
+                                    "created_at": datetime.datetime.now().isoformat(),
+                                    "async_request": True,
+                                    "status": "data_ready"
+                                }
+                                (run_dir / "user_meta.json").write_text(json.dumps(user_meta, ensure_ascii=False, indent=2), encoding="utf-8")
+                                (run_dir / "posts.json").write_text(json.dumps(items, ensure_ascii=False, indent=2), encoding="utf-8")
+
+                                # Запускаем загрузку изображений в фоне
+                                images_dir = run_dir / "images"
+                                background_tasks.add_task(download_photos_async, items, images_dir, run_id, username)
+
+                                return {
+                                    "success": True,
+                                    "runId": run_id,
+                                    "username": username,
+                                    "url": clean_url,
+                                    "message": f"✅ Данные получены! Получено {len(items)} элементов. Парсинг продолжается в фоне.",
+                                    "data": items,
+                                    "status": "data_ready",
+                                    "stats": {
+                                        "total_items": len(items),
+                                        "profile_data": len([item for item in items if item.get("username")]),
+                                        "processing_time_seconds": elapsed_time,
+                                        "images_status": "loading"
+                                    }
+                                }
+                    except Exception as data_error:
+                        log.warning(f"Не удалось получить промежуточные данные: {data_error}")
+
+                    # Если нет данных или ошибка, продолжаем ждать
+                    await asyncio.sleep(check_interval)
+                    elapsed_time += check_interval
+
             else:
                 raise HTTPException(500, f"Неожиданный статус актора: {status}")
 
-        except Exception as e:
-            if elapsed_time > 30:  # Если прошло больше 30 секунд, возвращаем ошибку
-                raise HTTPException(500, f"Ошибка при парсинге: {str(e)}")
-            else:
-                # Первые попытки могут не сработать - ждем
-                await asyncio.sleep(check_interval)
-                elapsed_time += check_interval
+        # Если не завершились за установленное время, но есть run_id, возвращаем информацию о продолжении в фоне
+        log.info(f"⏰ Парсинг не завершился за {max_wait_time}с, но продолжается в фоне для {run_id}")
+        return {
+            "success": True,
+            "runId": run_id,
+            "username": username,
+            "url": clean_url,
+            "message": f"🔄 Парсинг запущен и продолжается в фоне. Проверьте статус через несколько минут.",
+            "data": [],
+            "status": "running",
+            "stats": {
+                "total_items": 0,
+                "profile_data": 0,
+                "processing_time_seconds": elapsed_time,
+                "images_status": "pending"
+            }
+        }
 
-    raise HTTPException(408, f"Парсинг не завершился за {max_wait_time} секунд.")
+    except Exception as e:
+        log.error(f"❌ Критическая ошибка в start_scrape для {username}: {e}")
+        # Если у нас есть run_id, возвращаем информацию о неудаче
+        if 'run_id' in locals():
+            return {
+                "success": False,
+                "runId": run_id,
+                "username": username,
+                "url": clean_url,
+                "message": f"❌ Ошибка при парсинге: {str(e)}",
+                "data": [],
+                "status": "error",
+                "stats": {
+                    "total_items": 0,
+                    "profile_data": 0,
+                    "processing_time_seconds": 0,
+                    "images_status": "error"
+                }
+            }
+
+        # Если нет run_id или другая ошибка, возвращаем стандартную ошибку
+        raise HTTPException(500, f"Ошибка при запуске парсинга: {str(e)}")
 
 
 
