@@ -114,25 +114,41 @@ async def _save(url: str, folder: Path, client: httpx.AsyncClient, idx: int, max
             timeout = httpx.Timeout(30.0, connect=10.0)
             r = await client.get(url, follow_redirects=True, timeout=timeout)
             r.raise_for_status()
-            
+
+            # Проверяем размер контента (минимум 1KB для реального изображения)
+            if len(r.content) < 1024:
+                log.warning(f"Image too small ({len(r.content)} bytes) for {url}, creating placeholder")
+                _create_placeholder_image(folder, idx)
+                return
+
             # получаем расширение по Content-Type, fallback = .jpg
             ext = mimetypes.guess_extension(r.headers.get("content-type", "")) or ".jpg"
             fname = folder / f"{idx:03d}{ext}"
             fname.write_bytes(r.content)
-            log.debug("saved %s", fname.name)
+            log.debug(f"✅ Successfully saved {fname.name} ({len(r.content)} bytes)")
             return  # Успешно скачали, выходим
-            
+
         except (httpx.ConnectError, httpx.TimeoutException, httpx.RequestError) as e:
             if attempt < max_retries:
                 wait_time = 2 ** attempt  # Экспоненциальная задержка
-                log.warning(f"Attempt {attempt + 1} failed for {url}: {e}. Retrying in {wait_time}s...")
+                log.warning(f"⏳ Attempt {attempt + 1} failed for {url}: {e}. Retrying in {wait_time}s...")
                 await asyncio.sleep(wait_time)
             else:
-                log.error(f"Failed to download {url} after {max_retries + 1} attempts: {e}")
+                log.warning(f"❌ Failed to download {url} after {max_retries + 1} attempts: {e}. Creating placeholder.")
                 # Создаем заглушку для отсутствующего изображения
                 _create_placeholder_image(folder, idx)
+        except httpx.HTTPStatusError as e:
+            # Обрабатываем HTTP ошибки (403, 404, 429 и т.д.)
+            if e.response.status_code in [403, 404, 429]:
+                log.warning(f"❌ HTTP {e.response.status_code} for {url}. Creating placeholder.")
+                _create_placeholder_image(folder, idx)
+                return
+            else:
+                log.error(f"❌ Unexpected HTTP error {e.response.status_code} for {url}: {e}")
+                _create_placeholder_image(folder, idx)
+                return
         except Exception as e:
-            log.error(f"Unexpected error downloading {url}: {e}")
+            log.error(f"❌ Unexpected error downloading {url}: {e}")
             _create_placeholder_image(folder, idx)
             return
 
@@ -170,43 +186,6 @@ def _create_placeholder_image(folder: Path, idx: int):
         log.error(f"Failed to create placeholder image: {e}")
 
 
-async def _run_ocr_on_images(folder: Path):
-    """Запускает OCR на всех изображениях в папке и сохраняет результаты"""
-    try:
-        from app.services.ocr_service import extract_text_from_images
-        
-        # Находим все изображения (исключая placeholder'ы)
-        image_files = [
-            f for f in folder.glob("*.jpg") 
-            if not f.name.endswith("_placeholder.jpg")
-        ]
-        image_files.extend([f for f in folder.glob("*.jpeg") if not f.name.endswith("_placeholder.jpeg")])
-        image_files.extend([f for f in folder.glob("*.png") if not f.name.endswith("_placeholder.png")])
-        
-        if not image_files:
-            log.warning(f"No images found in {folder} for OCR")
-            return
-        
-        log.info(f"🔍 Starting OCR for {len(image_files)} images in {folder}")
-        
-        # Запускаем OCR
-        ocr_results = await extract_text_from_images(image_files)
-        
-        # Сохраняем результаты
-        ocr_file = folder / "ocr_results.json"
-        ocr_file.write_text(
-            json.dumps(ocr_results, ensure_ascii=False, indent=2),
-            encoding="utf-8"
-        )
-        
-        # Подсчитываем статистику
-        images_with_text = sum(1 for r in ocr_results.values() if r.get("has_text"))
-        log.info(f"✅ OCR completed: {images_with_text}/{len(image_files)} images contain text")
-        
-    except Exception as e:
-        log.error(f"❌ Error during OCR processing: {e}")
-
-
 def download_photos(items: List[Dict], folder: Path):
     """Синхронная обёртка для Starlette BackgroundTask с улучшенной обработкой ошибок."""
     try:
@@ -222,36 +201,65 @@ def download_photos(items: List[Dict], folder: Path):
             # Настройки клиента с более надежными параметрами
             limits = httpx.Limits(max_keepalive_connections=5, max_connections=10)
             timeout = httpx.Timeout(30.0, connect=10.0)
-            
-            async with httpx.AsyncClient(limits=limits, timeout=timeout) as client:
-                # Ограничиваем количество одновременных загрузок
-                semaphore = asyncio.Semaphore(3)
-                
-                async def download_with_semaphore(url: str, idx: int):
-                    async with semaphore:
-                        await _save(url, folder, client, idx)
-                
-                tasks = [download_with_semaphore(u, i) for i, u in enumerate(urls, 1)]
-                await asyncio.gather(*tasks, return_exceptions=True)
-            
-            # После загрузки изображений запускаем OCR
-            log.info("📸 Images downloaded, starting OCR processing...")
-            await _run_ocr_on_images(folder)
 
-        
+            async with httpx.AsyncClient(limits=limits, timeout=timeout) as client:
+                # Ограничиваем количество одновременных загрузок для стабильности
+                semaphore = asyncio.Semaphore(2)  # Уменьшили с 3 до 2
+
+                async def download_with_semaphore(url: str, idx: int):
+                    try:
+                        async with semaphore:
+                            await _save(url, folder, client, idx)
+                    except Exception as e:
+                        log.error(f"❌ Error in download_with_semaphore for {url}: {e}")
+                        # Создаем заглушку при критической ошибке
+                        _create_placeholder_image(folder, idx)
+
+                # Создаем задачи для всех URL
+                tasks = [download_with_semaphore(u, i) for i, u in enumerate(urls, 1)]
+
+                # Выполняем задачи с обработкой исключений
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+
+                # Логируем результаты
+                successful = sum(1 for r in results if not isinstance(r, Exception))
+                failed = sum(1 for r in results if isinstance(r, Exception))
+
+                log.info(f"📊 Загрузка завершена: {successful} успешно, {failed} с ошибками из {len(urls)} фото")
+
+                # Если все изображения не загрузились, создаем хотя бы одну заглушку
+                if successful == 0:
+                    log.warning("❌ Ни одно изображение не загрузилось, создаем заглушки")
+                    for i in range(min(5, len(urls))):  # Создаем до 5 заглушек
+                        _create_placeholder_image(folder, i + 1)
+
+
         try:
-            loop = asyncio.get_running_loop()
-            future = asyncio.run_coroutine_threadsafe(main(), loop)
-            future.result(timeout=300)  # 5 минут на загрузку и OCR до 50 фото
-        except RuntimeError:
-            asyncio.run(main())
-            
-        log.info(f"✅ Загрузка и OCR завершены ({len(urls)} фото обработано)")
-        
+            # Проверяем, есть ли уже запущенный event loop
+            try:
+                loop = asyncio.get_running_loop()
+                # Если loop уже запущен, создаем новую задачу
+                future = asyncio.run_coroutine_threadsafe(main(), loop)
+                future.result(timeout=300)  # Увеличено до 5 минут
+            except RuntimeError:
+                # Если нет запущенного loop, запускаем новый
+                asyncio.run(main())
+
+        except Exception as e:
+            log.error(f"❌ Critical error running download task: {e}")
+            # Создаем заглушки при критической ошибке
+            try:
+                for i in range(min(3, len(urls))):
+                    _create_placeholder_image(folder, i + 1)
+            except Exception as fallback_error:
+                log.error(f"❌ Failed to create fallback images: {fallback_error}")
+
+        log.info(f"✅ Загрузка завершена для {folder}")
+
     except Exception as e:
-        log.error(f"Critical error in download_photos: {e}")
+        log.error(f"❌ Critical error in download_photos: {e}")
         try:
             folder.mkdir(parents=True, exist_ok=True)
             _create_placeholder_image(folder, 1)
         except Exception as fallback_error:
-            log.error(f"Failed to create fallback image: {fallback_error}")
+            log.error(f"❌ Failed to create fallback image: {fallback_error}")

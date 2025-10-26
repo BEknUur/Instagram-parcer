@@ -8,10 +8,27 @@ interface InstagramData {
   url: string;
   message: string;
   data: any[];
+  status?: string;
   stats: {
     total_items: number;
     profile_data: number;
     processing_time_seconds: number;
+    images_status?: string;
+  };
+}
+
+interface ScrapeStatus {
+  success: boolean;
+  run_id: string;
+  status: string;
+  details: {
+    data_status: string;
+    images_count: number;
+    total_posts: number;
+    created_at: string;
+    images_started_at?: string;
+    images_finished_at?: string;
+    images_error?: string;
   };
 }
 
@@ -33,22 +50,6 @@ interface PostCaption {
   likesCount: number;
   commentsCount: number;
   shortCode?: string;
-  ocrText?: string;
-}
-
-
-interface OCRResult {
-  text: string;
-  confidence: number;
-  details: Array<{
-    text: string;
-    confidence: number;
-  }>;
-  has_text: boolean;
-}
-
-interface OCRData {
-  [filename: string]: OCRResult;
 }
 
 function App() {
@@ -62,12 +63,10 @@ function App() {
   const [postsPerPage, setPostsPerPage] = useState(15)
   const [currentPage, setCurrentPage] = useState(1)
   const [searchPostsText, setSearchPostsText] = useState('')
-  const [ocrData, setOcrData] = useState<OCRData | null>(null)
-  const [ocrLoading, setOcrLoading] = useState(false)
-  const [ocrAttempt, setOcrAttempt] = useState(0)
   const [images, setImages] = useState<string[]>([])
   const [showGallery, setShowGallery] = useState(true)
   const [imagesLoading, setImagesLoading] = useState(false)
+  const [scrapeStatus, setScrapeStatus] = useState<ScrapeStatus | null>(null)
 
   // Определяем API URL в зависимости от окружения
   const API_BASE_URL = window.location.hostname === 'localhost'
@@ -103,17 +102,63 @@ function App() {
       const data = await response.json()
       setResult(data)
 
-      // Загружаем изображения и OCR результаты с повторными попытками
-      // (так как загрузка и OCR выполняются в фоне и могут занять время)
+      // Запускаем мониторинг статуса и загрузку изображений
       if (data.runId) {
         loadImagesWithRetry(data.runId)
-        loadOCRResultsWithRetry(data.runId)
+        // Также запускаем мониторинг статуса для более точного отслеживания
+        checkScrapeStatus(data.runId)
       }
 
     } catch (err: any) {
       setError(err.message || 'Произошла ошибка при загрузке данных')
     } finally {
       setLoading(false)
+    }
+  }
+
+  // Функция для проверки статуса парсинга
+  const checkScrapeStatus = async (runId: string, attempt: number = 1, maxAttempts: number = 20) => {
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/scrape-status?run_id=${encodeURIComponent(runId)}`
+      )
+
+      if (response.ok) {
+        const statusData = await response.json()
+        setScrapeStatus(statusData)
+
+        // Если изображения готовы или есть ошибка, останавливаемся
+        if (statusData.status === 'completed') {
+          console.log(`✅ Парсинг завершен: ${statusData.details.images_count} изображений`)
+          // Загружаем изображения если они готовы
+          if (statusData.details.images_count > 0) {
+            loadImages(runId)
+          }
+          return
+        } else if (statusData.status === 'error') {
+          console.log('❌ Ошибка при загрузке изображений:', statusData.details.images_error)
+          return
+        }
+
+        // Если еще не готово и не превысили максимум попыток
+        if (attempt < maxAttempts) {
+          const delay = 10000 // 10 секунд
+          console.log(`⏳ Статус: ${statusData.status}, проверяем снова через ${delay / 1000}с...`)
+          setTimeout(() => checkScrapeStatus(runId, attempt + 1, maxAttempts), delay)
+        } else {
+          console.log('⏱️ Превышено максимальное количество попыток проверки статуса')
+        }
+      } else if (attempt < maxAttempts) {
+        const delay = 10000 // 10 секунд
+        setTimeout(() => checkScrapeStatus(runId, attempt + 1, maxAttempts), delay)
+      }
+    } catch (err: any) {
+      if (attempt < maxAttempts) {
+        const delay = 10000 // 10 секунд
+        setTimeout(() => checkScrapeStatus(runId, attempt + 1, maxAttempts), delay)
+      } else {
+        console.log('❌ Ошибка проверки статуса:', err.message)
+      }
     }
   }
 
@@ -181,70 +226,6 @@ function App() {
     }
   }
 
-  // Функция для загрузки OCR результатов с повторными попытками
-  const loadOCRResultsWithRetry = async (runId: string, attempt: number = 1, maxAttempts: number = 6) => {
-    setOcrLoading(true)
-    setOcrAttempt(attempt)
-
-    try {
-      const response = await fetch(
-        `${API_BASE_URL}/get-ocr-results?run_id=${encodeURIComponent(runId)}`
-      )
-
-      if (response.ok) {
-        const data = await response.json()
-        setOcrData(data.ocr_results)
-        console.log(`✅ Загружено OCR для ${data.images_with_text}/${data.total_images} изображений`)
-        setOcrLoading(false)
-        setOcrAttempt(0)
-
-        // Также загружаем список изображений
-        loadImages(runId)
-      } else if (attempt < maxAttempts) {
-        // Повторяем попытку с увеличивающейся задержкой
-        const delay = attempt * 10000 // 10, 20, 30, 40, 50 секунд
-        console.log(`OCR попытка ${attempt}/${maxAttempts}, следующая попытка через ${delay / 1000}с...`)
-        setTimeout(() => loadOCRResultsWithRetry(runId, attempt + 1, maxAttempts), delay)
-      } else {
-        console.log('OCR результаты недоступны после всех попыток')
-        setOcrLoading(false)
-        setOcrAttempt(0)
-      }
-    } catch (err: any) {
-      if (attempt < maxAttempts) {
-        const delay = attempt * 10000
-        setTimeout(() => loadOCRResultsWithRetry(runId, attempt + 1, maxAttempts), delay)
-      } else {
-        console.log('OCR результаты недоступны:', err.message)
-        setOcrLoading(false)
-        setOcrAttempt(0)
-      }
-    }
-  }
-
-  // Функция для загрузки OCR результатов (для ручного вызова)
-  const loadOCRResults = async (runId: string) => {
-    setOcrLoading(true)
-    try {
-      const response = await fetch(
-        `${API_BASE_URL}/get-ocr-results?run_id=${encodeURIComponent(runId)}`
-      )
-
-      if (response.ok) {
-        const data = await response.json()
-        setOcrData(data.ocr_results)
-        console.log(`✅ Загружено OCR для ${data.images_with_text}/${data.total_images} изображений`)
-      } else {
-        console.log('OCR результаты пока недоступны (возможно, обработка еще идет)')
-      }
-    } catch (err: any) {
-      console.log('OCR результаты недоступны:', err.message)
-    } finally {
-      setOcrLoading(false)
-    }
-  }
-
-
   // Извлекаем информацию о профиле
   const extractProfileInfo = (data: any[]): ProfileInfo | null => {
     if (!data || data.length === 0) return null
@@ -267,30 +248,13 @@ function App() {
   // Извлекаем тексты постов
   const extractCaptions = (data: any[]): PostCaption[] => {
     // В режиме 'posts', data - это уже массив постов
-    return data.map((post, index) => {
-      // Собираем OCR текст для всех изображений поста
-      let ocrText = ''
-      if (ocrData) {
-        // Изображения нумеруются с 001, и каждый пост может иметь несколько изображений
-        // Для упрощения берем первые 15 изображений и пытаемся найти соответствующие OCR результаты
-        const imageIndex = String(index + 1).padStart(3, '0')
-        const possibleFiles = [`${imageIndex}.jpg`, `${imageIndex}.jpeg`, `${imageIndex}.png`]
-
-        for (const filename of possibleFiles) {
-          if (ocrData[filename] && ocrData[filename].has_text) {
-            ocrText = ocrData[filename].text
-            break
-          }
-        }
-      }
-
+    return data.map((post) => {
       return {
         text: post.caption || '',
         timestamp: post.timestamp || '',
         likesCount: post.likesCount || 0,
         commentsCount: post.commentsCount || 0,
-        shortCode: post.shortCode || post.url?.split('/p/')[1]?.split('/')[0] || '',
-        ocrText: ocrText
+        shortCode: post.shortCode || post.url?.split('/p/')[1]?.split('/')[0] || ''
       }
     })
   }
@@ -301,8 +265,7 @@ function App() {
     const search = searchPostsText.toLowerCase()
     return captions.filter(caption =>
       caption.text.toLowerCase().includes(search) ||
-      caption.shortCode?.toLowerCase().includes(search) ||
-      (caption.ocrText && caption.ocrText.toLowerCase().includes(search))
+      caption.shortCode?.toLowerCase().includes(search)
     )
   }
 
@@ -321,7 +284,7 @@ function App() {
   return (
     <div className="container">
       <h1>Instagram Parser</h1>
-      <p className="subtitle">Получите данные профиля Instagram с OCR текста с изображений</p>
+      <p className="subtitle">Получите данные профиля Instagram с изображениями</p>
 
       <form onSubmit={handleSubmit} className="form">
         <div className="input-group">
@@ -375,8 +338,64 @@ function App() {
               </div>
             </div>
 
-            {/* Статус загрузки изображений и OCR */}
+            {/* Статус загрузки изображений */}
             <div style={{ marginTop: '1rem', display: 'flex', gap: '1rem', alignItems: 'center', flexWrap: 'wrap' }}>
+              {scrapeStatus && (
+                <>
+                  {scrapeStatus.status === 'completed' && scrapeStatus.details.images_count > 0 && (
+                    <div style={{
+                      padding: '0.5rem 1rem',
+                      backgroundColor: '#d4edda',
+                      color: '#155724',
+                      borderRadius: '0.3rem',
+                      fontSize: '0.9rem',
+                      fontWeight: 'bold',
+                      border: '1px solid #c3e6cb'
+                    }}>
+                      ✅ {scrapeStatus.details.images_count} фото загружено
+                    </div>
+                  )}
+                  {scrapeStatus.status === 'images_loading' && (
+                    <div style={{
+                      padding: '0.5rem 1rem',
+                      backgroundColor: '#fff3cd',
+                      color: '#856404',
+                      borderRadius: '0.3rem',
+                      fontSize: '0.9rem',
+                      fontWeight: 'bold',
+                      border: '1px solid #ffeaa7'
+                    }}>
+                      ⏳ Загружаем изображения... ({scrapeStatus.details.images_count || 0} загружено)
+                    </div>
+                  )}
+                  {scrapeStatus.status === 'error' && (
+                    <div style={{
+                      padding: '0.5rem 1rem',
+                      backgroundColor: '#f8d7da',
+                      color: '#721c24',
+                      borderRadius: '0.3rem',
+                      fontSize: '0.9rem',
+                      fontWeight: 'bold',
+                      border: '1px solid #f5c6cb'
+                    }}>
+                      ❌ Ошибка загрузки изображений
+                    </div>
+                  )}
+                  {scrapeStatus.status === 'data_ready' && (
+                    <div style={{
+                      padding: '0.5rem 1rem',
+                      backgroundColor: '#d1ecf1',
+                      color: '#0c5460',
+                      borderRadius: '0.3rem',
+                      fontSize: '0.9rem',
+                      fontWeight: 'bold',
+                      border: '1px solid #bee5eb'
+                    }}>
+                      ⏳ Данные получены, загружаем изображения...
+                    </div>
+                  )}
+                </>
+              )}
               {images.length > 0 && (
                 <div style={{
                   padding: '0.5rem 1rem',
@@ -386,7 +405,7 @@ function App() {
                   fontSize: '0.9rem',
                   fontWeight: 'bold'
                 }}>
-                  📸 {images.length} фото загружено
+                  📸 {images.length} фото доступно
                 </div>
               )}
               {imagesLoading && (
@@ -397,29 +416,7 @@ function App() {
                   backgroundColor: '#fff3cd',
                   borderRadius: '0.3rem'
                 }}>
-                  ⏳ Загрузка изображений...
-                </div>
-              )}
-              {ocrData && (
-                <div style={{
-                  padding: '0.5rem 1rem',
-                  backgroundColor: '#d4edda',
-                  color: '#155724',
-                  borderRadius: '0.3rem',
-                  fontSize: '0.9rem'
-                }}>
-                  📝 OCR: {Object.values(ocrData).filter(r => r.has_text).length} изображений с текстом
-                </div>
-              )}
-              {ocrLoading && (
-                <div style={{
-                  fontSize: '0.9rem',
-                  color: '#666',
-                  padding: '0.5rem 1rem',
-                  backgroundColor: '#fff3cd',
-                  borderRadius: '0.3rem'
-                }}>
-                  ⏳ {ocrAttempt > 0 ? `Ожидание OCR (попытка ${ocrAttempt}/6)...` : 'Обработка OCR...'}
+                  🔄 Проверяем изображения...
                 </div>
               )}
               {!imagesLoading && images.length === 0 && result.runId && (
@@ -436,22 +433,6 @@ function App() {
                   }}
                 >
                   📸 Загрузить изображения
-                </button>
-              )}
-              {!ocrData && !ocrLoading && result.runId && (
-                <button
-                  onClick={() => loadOCRResults(result.runId)}
-                  style={{
-                    padding: '0.5rem 1rem',
-                    fontSize: '0.9rem',
-                    borderRadius: '0.3rem',
-                    border: '1px solid #007bff',
-                    backgroundColor: '#fff',
-                    color: '#007bff',
-                    cursor: 'pointer'
-                  }}
-                >
-                  🔍 Загрузить OCR
                 </button>
               )}
             </div>
@@ -479,7 +460,6 @@ function App() {
                 }}>
                   {images.map((imageName, index) => {
                     const imageUrl = `${API_BASE_URL}/image/${result.runId}/${imageName}`
-                    const ocrResult = ocrData?.[imageName]
 
                     return (
                       <div key={index} style={{
@@ -534,57 +514,6 @@ function App() {
                           }}>
                             {imageName}
                           </div>
-                          {ocrResult && ocrResult.has_text && (
-                            <div style={{
-                              fontSize: '0.85rem',
-                              padding: '0.75rem',
-                              backgroundColor: '#f0f9ff',
-                              borderRadius: '0.5rem',
-                              borderLeft: '4px solid #3b82f6'
-                            }}>
-                              <div style={{
-                                fontWeight: 'bold',
-                                marginBottom: '0.5rem',
-                                color: '#3b82f6',
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: '0.5rem'
-                              }}>
-                                <span>📝 Распознанный текст</span>
-                                <span style={{
-                                  fontSize: '0.7rem',
-                                  backgroundColor: '#3b82f6',
-                                  color: 'white',
-                                  padding: '0.15rem 0.4rem',
-                                  borderRadius: '0.25rem'
-                                }}>
-                                  {Math.round(ocrResult.confidence * 100)}%
-                                </span>
-                              </div>
-                              <div style={{
-                                fontSize: '0.85rem',
-                                color: '#1e3a8a',
-                                lineHeight: '1.5',
-                                maxHeight: '80px',
-                                overflow: 'auto'
-                              }}>
-                                {ocrResult.text}
-                              </div>
-                            </div>
-                          )}
-                          {ocrResult && !ocrResult.has_text && (
-                            <div style={{
-                              fontSize: '0.85rem',
-                              color: '#999',
-                              fontStyle: 'italic',
-                              padding: '0.5rem',
-                              backgroundColor: '#f8f8f8',
-                              borderRadius: '0.5rem',
-                              textAlign: 'center'
-                            }}>
-                              📄 Текст не обнаружен
-                            </div>
-                          )}
                         </div>
                       </div>
                     )
@@ -678,7 +607,7 @@ function App() {
                     <div style={{ marginBottom: '1rem' }}>
                       <input
                         type="text"
-                        placeholder="🔍 Поиск по тексту, OCR или shortCode..."
+                        placeholder="🔍 Поиск по тексту или shortCode..."
                         value={searchPostsText}
                         onChange={(e) => {
                           setSearchPostsText(e.target.value)
@@ -746,32 +675,6 @@ function App() {
                                 <span>❤️ {caption.likesCount.toLocaleString()}</span>
                                 <span>💬 {caption.commentsCount.toLocaleString()}</span>
                               </div>
-
-                              {/* OCR текст с изображений */}
-                              {caption.ocrText && (
-                                <div style={{
-                                  marginTop: '1rem',
-                                  padding: '0.75rem',
-                                  backgroundColor: '#f8f9fa',
-                                  borderRadius: '0.5rem',
-                                  borderLeft: '3px solid #007bff'
-                                }}>
-                                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
-                                    <span style={{ fontSize: '0.9rem', fontWeight: 'bold', color: '#007bff' }}>
-                                      📷 Текст с изображения:
-                                    </span>
-                                  </div>
-                                  <p style={{
-                                    margin: 0,
-                                    fontSize: '0.95rem',
-                                    color: '#333',
-                                    fontStyle: 'italic',
-                                    lineHeight: '1.5'
-                                  }}>
-                                    {caption.ocrText}
-                                  </p>
-                                </div>
-                              )}
                             </div>
                           )
                         })
