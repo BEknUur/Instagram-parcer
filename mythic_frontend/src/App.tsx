@@ -11,7 +11,6 @@ interface InstagramData {
   stats: {
     total_items: number;
     profile_data: number;
-    posts_with_comments: number;
     processing_time_seconds: number;
   };
 }
@@ -37,13 +36,6 @@ interface PostCaption {
   ocrText?: string;
 }
 
-interface PostComments {
-  [shortCode: string]: {
-    loading: boolean;
-    comments: any[];
-    error: string | null;
-  };
-}
 
 interface OCRResult {
   text: string;
@@ -67,8 +59,6 @@ function App() {
   const [showJson, setShowJson] = useState(false)
   const [showCaptions, setShowCaptions] = useState(true)
   const [showProfile, setShowProfile] = useState(true)
-  const [postComments, setPostComments] = useState<PostComments>({})
-  const [commentLimits, setCommentLimits] = useState<{ [key: string]: number }>({})
   const [postsPerPage, setPostsPerPage] = useState(15)
   const [currentPage, setCurrentPage] = useState(1)
   const [searchPostsText, setSearchPostsText] = useState('')
@@ -254,48 +244,6 @@ function App() {
     }
   }
 
-  // Функция для загрузки комментариев конкретного поста
-  const loadPostComments = async (shortCode: string) => {
-    const postUrl = `https://www.instagram.com/p/${shortCode}/`
-    const limit = commentLimits[shortCode] || 50
-
-    // Устанавливаем состояние загрузки
-    setPostComments(prev => ({
-      ...prev,
-      [shortCode]: { loading: true, comments: [], error: null }
-    }))
-
-    try {
-      const response = await fetch(
-        `${API_BASE_URL}/scrape-comments?post_urls=${encodeURIComponent(postUrl)}&results_limit=${limit}`
-      )
-
-      if (!response.ok) {
-        throw new Error(`Ошибка ${response.status}`)
-      }
-
-      const data = await response.json()
-
-      setPostComments(prev => ({
-        ...prev,
-        [shortCode]: {
-          loading: false,
-          comments: data.comments || [],
-          error: null
-        }
-      }))
-
-    } catch (err: any) {
-      setPostComments(prev => ({
-        ...prev,
-        [shortCode]: {
-          loading: false,
-          comments: [],
-          error: err.message || 'Ошибка загрузки комментариев'
-        }
-      }))
-    }
-  }
 
   // Извлекаем информацию о профиле
   const extractProfileInfo = (data: any[]): ProfileInfo | null => {
@@ -373,7 +321,7 @@ function App() {
   return (
     <div className="container">
       <h1>Instagram Parser</h1>
-      <p className="subtitle">Получите данные профиля и комментарии Instagram</p>
+      <p className="subtitle">Получите данные профиля Instagram с OCR текста с изображений</p>
 
       <form onSubmit={handleSubmit} className="form">
         <div className="input-group">
@@ -780,8 +728,6 @@ function App() {
                     <div className="captions-list">
                       {captions.length > 0 ? (
                         captions.map((caption, index) => {
-                          const shortCode = caption.shortCode || ''
-                          const commentsState = postComments[shortCode]
                           const globalIndex = (currentPage - 1) * postsPerPage + index + 1
 
                           return (
@@ -789,7 +735,7 @@ function App() {
                               <div className="caption-header">
                                 <span className="caption-number">
                                   Пост #{globalIndex}
-                                  {shortCode && <span className="shortcode"> ({shortCode})</span>}
+                                  {caption.shortCode && <span className="shortcode"> ({caption.shortCode})</span>}
                                 </span>
                                 <span className="caption-date">
                                   {caption.timestamp ? new Date(caption.timestamp).toLocaleDateString('ru-RU') : 'Дата неизвестна'}
@@ -824,58 +770,6 @@ function App() {
                                   }}>
                                     {caption.ocrText}
                                   </p>
-                                </div>
-                              )}
-
-                              {/* Кнопка для загрузки комментариев */}
-                              {shortCode && (
-                                <div className="comments-controls">
-                                  <input
-                                    type="number"
-                                    min="1"
-                                    max="500"
-                                    value={commentLimits[shortCode] || 50}
-                                    onChange={(e) => setCommentLimits(prev => ({
-                                      ...prev,
-                                      [shortCode]: Number(e.target.value)
-                                    }))}
-                                    className="comment-limit-input"
-                                    placeholder="Лимит"
-                                  />
-                                  <button
-                                    onClick={() => loadPostComments(shortCode)}
-                                    disabled={commentsState?.loading}
-                                    className="load-comments-btn"
-                                  >
-                                    {commentsState?.loading ? '⏳ Загрузка...' : '💬 Загрузить комментарии'}
-                                  </button>
-                                </div>
-                              )}
-
-                              {/* Отображение комментариев */}
-                              {commentsState?.error && (
-                                <div className="comments-error">❌ {commentsState.error}</div>
-                              )}
-
-                              {commentsState?.comments && commentsState.comments.length > 0 && (
-                                <div className="post-comments-section">
-                                  <h4>💬 Комментарии ({commentsState.comments.length})</h4>
-                                  <div className="post-comments-list">
-                                    {commentsState.comments.map((comment: any, cIndex: number) => (
-                                      <div key={cIndex} className="comment-item">
-                                        <div className="comment-author">
-                                          <strong>@{comment.ownerUsername || 'Аноним'}</strong>
-                                          <span className="comment-date">
-                                            {comment.timestamp ? new Date(comment.timestamp).toLocaleDateString('ru-RU') : ''}
-                                          </span>
-                                        </div>
-                                        <p className="comment-text">{comment.text}</p>
-                                        {comment.likesCount > 0 && (
-                                          <span className="comment-likes">❤️ {comment.likesCount}</span>
-                                        )}
-                                      </div>
-                                    ))}
-                                  </div>
                                 </div>
                               )}
                             </div>

@@ -58,10 +58,3 @@ async def fetch_items(dataset_id: str, limit: int = 1000, retries: int = 10, del
     return []
 
 
-async def run_comment_scraper(run_input: dict) -> dict:
-    """Запускаем Instagram Comment Scraper Actor (apify/instagram-comment-scraper)."""
-    def _sync():
-        # Используем Actor по имени apify/instagram-comment-scraper
-        act = _client.actor("apify/instagram-comment-scraper")
-        return act.call(run_input=run_input)
-    return await anyio.to_thread.run_sync(_sync)
